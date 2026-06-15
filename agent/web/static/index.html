@@ -15,18 +15,28 @@
     <div class="actions">
       <button id="btn-find" class="btn">Fetch jobs</button>
       <button id="btn-generate" class="btn">Generate drafts</button>
-      <button id="btn-apply" class="btn btn-primary">Apply approved</button>
+      <button id="btn-apply" class="btn btn-primary">Apply selected</button>
       <button id="btn-stop" class="btn btn-stop" hidden>Stop</button>
     </div>
     <div id="run-status" class="run-status idle">idle</div>
   </header>
 
-  <section class="stats" id="stats"></section>
+  <section class="toolbar">
+    <div class="master-bar">
+      <span class="master-bar-label">Master resume</span>
+      <span id="master-hint" class="master-hint"></span>
+      <button id="btn-replace-master" class="btn btn-sm" type="button" title="Replaces profile/master_resume and refreshes intake.yaml">Replace master&hellip;</button>
+    </div>
+    <input id="upload-master" type="file" accept=".docx,.pdf,.txt" hidden />
+    <input id="upload-job-resume" type="file" accept=".docx,.pdf" hidden />
 
-  <section class="runs">
-    <button id="btn-runs" class="linklike">Recent runs &#9662;</button>
-    <div id="runs-panel" hidden></div>
+    <section class="runs">
+      <button id="btn-runs" class="linklike">Recent runs &#9662;</button>
+      <div id="runs-panel" hidden></div>
+    </section>
   </section>
+
+  <section class="stats" id="stats"></section>
 
   <section class="filters">
     <input id="f-search" type="search" placeholder="Search title or company&hellip;" />
@@ -47,7 +57,11 @@
     <label class="chk"><input id="f-hasresume" type="checkbox" /> Has resume</label>
     <span class="spacer"></span>
     <span id="selcount" class="selcount">0 selected</span>
+    <span class="bulk-label">Apply selected with:</span>
+    <button id="btn-resume-tailored" class="btn btn-sm" title="Use each job's tailored resume when applying">Tailored draft</button>
+    <button id="btn-resume-mine" class="btn btn-sm" title="Use your master resume when applying">My master</button>
     <button id="btn-approve" class="btn btn-ok">Approve selected</button>
+    <button id="btn-apply-bar" class="btn btn-primary btn-sm" title="Submit applications for checked rows">Apply selected</button>
     <button id="btn-reject" class="btn btn-warn">Reject selected</button>
   </section>
 
@@ -63,7 +77,8 @@
           <th class="sortable" data-sort="apply_type">Type</th>
           <th class="sortable" data-sort="status">Status</th>
           <th>Approved</th>
-          <th>Docs</th>
+          <th title="Which resume file is uploaded when you apply to this job">Apply with</th>
+          <th>Files</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>

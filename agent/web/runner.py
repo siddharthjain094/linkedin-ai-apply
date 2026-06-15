@@ -27,6 +27,7 @@ class ActionRunner:
         self.finished_at: Optional[str] = None
         self.result: Optional[dict] = None
         self.error: Optional[str] = None
+        self.progress: str = ""
 
     @property
     def running(self) -> bool:
@@ -55,6 +56,7 @@ class ActionRunner:
             self.finished_at = None
             self.result = None
             self.error = None
+            self.progress = ""
 
             def _target() -> None:
                 try:
@@ -69,7 +71,14 @@ class ActionRunner:
             self._thread.start()
             return True
 
+    def set_progress(self, message: str) -> None:
+        """Best-effort live status for the UI (safe from worker threads)."""
+        with self._lock:
+            self.progress = message or ""
+
     def snapshot(self) -> dict:
+        with self._lock:
+            progress = self.progress
         return {
             "running": self.running,
             "action": self.action,
@@ -77,5 +86,6 @@ class ActionRunner:
             "finished_at": self.finished_at,
             "result": self.result,
             "error": self.error,
+            "progress": progress,
             "stop_requested": self._cancel.is_set(),
         }

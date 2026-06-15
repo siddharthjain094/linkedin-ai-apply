@@ -6,6 +6,8 @@ const state = {
   sortKey: "match_score",
   sortDir: -1,
   pollTimer: null,
+  masterResume: { available: false, name: "", url: "" },
+  pendingJobUpload: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -31,11 +33,26 @@ function toast(msg, isErr) {
 async function loadJobs() {
   const data = await api("/api/jobs");
   state.jobs = data.jobs;
+  state.masterResume = data.master_resume || state.masterResume;
+  updateMasterHint();
   // Drop selections for jobs that no longer exist.
   const ids = new Set(state.jobs.map((j) => j.job_id));
   state.selected = new Set([...state.selected].filter((id) => ids.has(id)));
   render();
   loadStats();
+}
+
+function updateMasterHint() {
+  const el = $("master-hint");
+  const m = state.masterResume;
+  const mineBtn = $("btn-resume-mine");
+  if (!m.available) {
+    el.innerHTML = '<span class="dim">none yet</span>';
+    if (mineBtn) mineBtn.disabled = true;
+    return;
+  }
+  el.innerHTML = `<a href="${esc(m.url)}" target="_blank" title="View master resume">${esc(m.name)}</a>`;
+  if (mineBtn) mineBtn.disabled = false;
 }
 
 async function loadStats() {
@@ -110,13 +127,44 @@ function scoreClass(s) {
   return "lo";
 }
 
+function uploadToggleHtml(j) {
+  const masterOk = state.masterResume.available;
+  const mineOn = j.use_master_resume ? " on" : "";
+  const tailoredOn = j.use_master_resume ? "" : " on";
+  const dis = masterOk ? "" : " disabled";
+  return `<div class="seg" data-id="${esc(j.job_id)}" title="Pick which file is uploaded when applying">
+    <button type="button" class="seg-btn tailored${tailoredOn}" data-val="tailored">Tailored</button>
+    <button type="button" class="seg-btn master${mineOn}" data-val="master"${dis} title="Uses master resume from profile/">Master</button>
+  </div>`;
+}
+
+function docsHtml(j) {
+  const jid = encodeURIComponent(j.job_id);
+  const tailoredView = j.resume_exists
+    ? `<a class="doclink" href="/api/jobs/${jid}/resume" target="_blank">view</a>`
+    : `<span class="dim">none</span>`;
+  const tailoredAction = j.resume_exists ? "Replace" : "Upload";
+  const tailoredBtn = `<button type="button" class="doc-action" data-replace="${esc(j.job_id)}" title="Upload a .docx or .pdf tailored resume for this job only">${tailoredAction}&hellip;</button>`;
+
+  const coverView = j.cover_exists
+    ? `<a class="doclink" href="/api/jobs/${jid}/cover" target="_blank">view</a>`
+    : `<span class="dim">none</span>`;
+
+  return `<div class="doc-cell">
+    <div class="doc-row">
+      <span class="doc-label">Tailored resume</span>
+      <span class="doc-actions">${tailoredView} ${tailoredBtn}</span>
+    </div>
+    <div class="doc-row">
+      <span class="doc-label">Cover letter</span>
+      <span class="doc-actions">${coverView}</span>
+    </div>
+  </div>`;
+}
+
 function rowHtml(j) {
   const checked = state.selected.has(j.job_id) ? "checked" : "";
   const score = j.match_score == null ? "&ndash;" : Math.round(j.match_score);
-  const docs = [];
-  if (j.resume_exists) docs.push(`<a class="doclink" href="/api/jobs/${encodeURIComponent(j.job_id)}/resume" target="_blank">resume</a>`);
-  if (j.cover_exists) docs.push(`<a class="doclink" href="/api/jobs/${encodeURIComponent(j.job_id)}/cover" target="_blank">cover</a>`);
-  if (!docs.length) docs.push('<span class="dim">&mdash;</span>');
 
   return `<tr data-id="${j.job_id}">
     <td class="c-check"><input type="checkbox" class="rowcheck" ${checked} /></td>
@@ -130,7 +178,8 @@ function rowHtml(j) {
     <td>${esc(j.apply_type)}</td>
     <td><span class="badge ${esc(j.status)}">${esc(j.status)}</span></td>
     <td>${j.approved ? '<span class="yes">yes</span>' : '<span class="no">&mdash;</span>'}</td>
-    <td>${docs.join("")}</td>
+    <td class="c-upload">${uploadToggleHtml(j)}</td>
+    <td class="c-files">${docsHtml(j)}</td>
   </tr>`;
 }
 
@@ -164,6 +213,56 @@ async function approveSelected(approved) {
   });
   toast(`${approved ? "Approved" : "Rejected"} ${r.changed} job(s).`);
   await loadJobs();
+}
+
+async function uploadFile(url, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(url, { method: "POST", body: fd });
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) throw new Error((body && body.detail) || res.statusText);
+  return body;
+}
+
+async function replaceMasterResume(file) {
+  const data = await uploadFile("/api/master-resume/upload", file);
+  if (data.master_resume) state.masterResume = data.master_resume;
+  updateMasterHint();
+  const intakeMsg = data.intake && data.intake.ok
+    ? ` Intake updated (${data.intake.fields_merged} fields from resume).`
+    : "";
+  toast(`Replaced master resume with ${data.name}.${intakeMsg}`);
+  await loadJobs();
+}
+
+async function replaceJobResume(jobId, file) {
+  const data = await uploadFile(
+    `/api/jobs/${encodeURIComponent(jobId)}/resume/upload`, file);
+  toast(`Tailored resume saved as ${data.name}. Re-approve before applying.`);
+  await loadJobs();
+}
+
+async function setResumeSource(useMaster, jobIds) {
+  const ids = jobIds || selectedIds();
+  if (!ids.length) return toast("Select some jobs first.", true);
+  if (useMaster && !state.masterResume.available) {
+    return toast("Add profile/master_resume.docx first.", true);
+  }
+  const r = await api("/api/jobs/resume-source", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_ids: ids, use_master: useMaster }),
+  });
+  toast(`Set ${r.changed} job(s) to apply with ${useMaster ? "your master resume" : "each job's tailored draft"}.`);
+  await loadJobs();
+}
+
+async function applySelected() {
+  const ids = selectedIds();
+  if (!ids.length) return toast("Select one or more jobs in the grid first.", true);
+  if (!confirm(`Submit applications to ${ids.length} selected job(s)?`)) return;
+  await trigger("apply", { job_ids: ids });
 }
 
 async function trigger(name, body) {
@@ -208,7 +307,11 @@ async function pollStatus() {
 
   if (busy) {
     el.className = "run-status running";
-    el.textContent = s.stop_requested ? `stopping: ${s.action}\u2026` : `running: ${s.action}\u2026`;
+    const detail = s.progress ? ` — ${s.progress}` : "";
+    el.textContent = s.stop_requested
+      ? `stopping: ${s.action}\u2026${detail}`
+      : `running: ${s.action}\u2026${detail}`;
+    el.title = s.progress || "";
     clearTimeout(state.pollTimer);
     state.pollTimer = setTimeout(pollStatus, 2000);
   } else if (s.error) {
@@ -220,7 +323,13 @@ async function pollStatus() {
   } else if (s.action) {
     el.className = "run-status done";
     el.textContent = `${s.action} done`;
-    if (s.result) toast(`${s.action}: ${JSON.stringify(s.result)}`);
+    el.title = "";
+    if (s.result) {
+      const msg = s.result.message
+        ? s.result.message
+        : JSON.stringify(s.result);
+      toast(`${s.action}: ${msg}`, !!s.result.message && s.result.applied === 0);
+    }
     loadJobs();
     loadRuns();
   } else {
@@ -251,6 +360,26 @@ function wire() {
     render();
   });
 
+  $("rows").addEventListener("click", (e) => {
+    const rep = e.target.closest("[data-replace]");
+    if (rep) {
+      e.preventDefault();
+      state.pendingJobUpload = rep.dataset.replace;
+      $("upload-job-resume").click();
+      return;
+    }
+    const btn = e.target.closest(".seg-btn");
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    const seg = btn.closest(".seg");
+    const jobId = seg && seg.dataset.id;
+    if (!jobId) return;
+    const useMaster = btn.dataset.val === "master";
+    const job = state.jobs.find((j) => j.job_id === jobId);
+    if (job && !!job.use_master_resume === useMaster) return;
+    setResumeSource(useMaster, [jobId]);
+  });
+
   $("check-all").addEventListener("change", (e) => {
     const rows = filtered();
     if (e.target.checked) rows.forEach((j) => state.selected.add(j.job_id));
@@ -260,17 +389,35 @@ function wire() {
 
   $("btn-approve").addEventListener("click", () => approveSelected(true));
   $("btn-reject").addEventListener("click", () => approveSelected(false));
+  $("btn-resume-tailored").addEventListener("click", () => setResumeSource(false));
+  $("btn-resume-mine").addEventListener("click", () => setResumeSource(true));
   $("btn-find").addEventListener("click", () => trigger("find"));
   $("btn-generate").addEventListener("click", () => trigger("generate"));
-  $("btn-apply").addEventListener("click", () => {
-    if (confirm("Submit applications to all APPROVED jobs?")) trigger("apply", { only_approved: true });
-  });
+  $("btn-apply").addEventListener("click", () => applySelected().catch((e) => toast(e.message, true)));
+  $("btn-apply-bar").addEventListener("click", () => applySelected().catch((e) => toast(e.message, true)));
   $("btn-stop").addEventListener("click", stopAction);
   $("btn-runs").addEventListener("click", () => {
     const panel = $("runs-panel");
     panel.hidden = !panel.hidden;
     $("btn-runs").innerHTML = panel.hidden ? "Recent runs \u25BE" : "Recent runs \u25B4";
     loadRuns();
+  });
+
+  $("btn-replace-master").addEventListener("click", () => $("upload-master").click());
+  $("upload-master").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    replaceMasterResume(file).catch((err) => toast(err.message, true));
+  });
+
+  $("upload-job-resume").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    const jobId = state.pendingJobUpload;
+    e.target.value = "";
+    state.pendingJobUpload = null;
+    if (!file || !jobId) return;
+    replaceJobResume(jobId, file).catch((err) => toast(err.message, true));
   });
 }
 

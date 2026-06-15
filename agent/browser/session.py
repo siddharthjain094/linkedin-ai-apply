@@ -271,6 +271,23 @@ class BrowserSession:
             if self.is_logged_in():
                 return
 
+    # ---- navigation --------------------------------------------------------
+    def navigate(self, url: str, *, progress=None) -> None:
+        """Open ``url`` in the automation tab and bring it to the front."""
+        from agent.browser.finders import human_delay
+
+        if progress:
+            try:
+                progress(url)
+            except Exception:
+                pass
+        try:
+            self.page.bring_to_front()
+        except Exception:
+            pass
+        self.page.goto(url, wait_until="domcontentloaded")
+        human_delay(self.settings.min_delay_ms, self.settings.max_delay_ms)
+
     # ---- pacing ------------------------------------------------------------
     def _sleep(self, seconds: float) -> None:
         time.sleep(seconds)

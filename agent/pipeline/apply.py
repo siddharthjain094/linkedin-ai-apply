@@ -7,15 +7,21 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from rich.console import Console
+from sqlalchemy import select
 
+from agent.browser.job_page import is_linkedin_job_url
 from agent.browser.easy_apply import easy_apply
 from agent.browser.external_apply import external_apply
 from agent.browser.session import LoggedOutError
 from agent.config import Settings, SubmitMode
 from agent.db import Database
 from agent.llm.provider import LLMClient
-from agent.models import Status
-from agent.pipeline.generate import finalize_resume_for_upload, generate_documents
+from agent.models import Job, Status, TERMINAL_STATUSES
+from agent.pipeline.generate import (
+    finalize_resume_for_upload,
+    generate_documents,
+    master_resume_for_upload,
+)
 
 console = Console()
 
@@ -26,19 +32,46 @@ def run_apply(
     db: Database,
     llm: LLMClient | None,
     only_approved: bool = False,
+    job_ids: list[str] | None = None,
     regenerate: bool = False,
     should_stop: Optional[Callable[[], bool]] = None,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
+    selected = list(dict.fromkeys(job_ids or []))
+    if selected:
+        retried = db.resolve_human_review_for(selected)
+        if retried and progress:
+            progress(f"Retrying {retried} selected job(s) from human review")
+    elif only_approved:
+        retried = db.resolve_approved_human_review()
+        if retried and progress:
+            progress(f"Retrying {retried} approved job(s) from human review")
+
     candidates = [
         j for j in db.pending_for_apply()
         if (j.match_score or 0) >= settings.match_threshold
     ]
-    if only_approved:
-        # Review-gated flow: act only on jobs the user explicitly signed off on.
+    if selected:
+        wanted = set(selected)
+        candidates = [j for j in candidates if j.job_id in wanted]
+    elif only_approved:
         candidates = [j for j in candidates if j.approved]
+
     stats = {"applied": 0, "human_review": 0, "errors": 0, "generated": 0,
-             "skipped": 0, "closed": 0, "stopped": False}
+             "skipped": 0, "closed": 0, "stopped": False, "targeted": len(selected)}
     submitted = 0
+
+    if not candidates:
+        msg = _explain_no_candidates(db, settings, only_approved, selected)
+        stats["message"] = msg
+        console.log(f"[yellow]{msg}[/]")
+        db.log_run("apply", notes=msg)
+        return stats
+
+    if progress:
+        progress(f"Applying to {len(candidates)} job(s) — watch the Chrome window the tool opened")
+    if settings.dry_run and progress:
+        progress("DRY_RUN is on: forms fill but final submit is skipped")
 
     try:
         for job in candidates:
@@ -56,6 +89,9 @@ def run_apply(
                 console.log(f"Reached MAX_APPLIES_PER_RUN ({settings.max_applies_per_run}).")
                 break
 
+            label = f"{job.title} @ {job.company}".strip(" @")
+            if progress:
+                progress(f"Opening job: {label}")
             _process_one(session, settings, db, llm, job, regenerate, stats)
             if stats.pop("_just_submitted", False):
                 submitted += 1
@@ -81,17 +117,30 @@ def _process_one(session, settings, db, llm, job, regenerate, stats) -> None:
                   status=Status.generated.value)
         stats["generated"] += 1
 
-    upload = _resume_for_upload(settings, resume_path)
+    upload = (
+        master_resume_for_upload(settings)
+        if job.use_master_resume
+        else _resume_for_upload(settings, resume_path)
+    )
+    if job.use_master_resume and upload is None:
+        _park_for_review(
+            db, job, "use_master_resume set but master resume file not found.", [])
+        stats["human_review"] += 1
+        console.log(f"[yellow]Human review[/]: {job.title} @ {job.company} - "
+                    "master resume missing")
+        return
+
     apply_type = job.apply_type or "unknown"
+    job_url = job.url or ""
+    linkedin_job = is_linkedin_job_url(job_url)
 
     if settings.submit_mode == SubmitMode.review:
         _park_for_review(db, job, "review mode: documents drafted, submit manually.", [])
         stats["human_review"] += 1
         return
 
-    # apply_type is detected at discovery time but can be stale/unknown, so we
-    # don't fully trust it. "post" is unambiguously external; everything else
-    # (easy/unknown) tries Easy Apply first and falls back to the external path.
+    # apply_type is detected at discovery time but can be stale/wrong. LinkedIn jobs
+    # always try Easy Apply first — many tagged "external" are still Easy Apply.
     def _go_external() -> tuple[str, str, list]:
         if settings.submit_mode == SubmitMode.easy_only:
             _park_for_review(
@@ -100,8 +149,15 @@ def _process_one(session, settings, db, llm, job, regenerate, stats) -> None:
         return external_apply(
             session, settings, job.as_row(), settings.intake, llm, upload)
 
+    status, notes, needs_input = "", "", []
+
     if apply_type == "post":
         status, notes, needs_input = _go_external()
+    elif linkedin_job or apply_type in ("easy", "unknown", "external"):
+        status, notes, needs_input = easy_apply(
+            session, settings, job.as_row(), settings.intake, llm, upload)
+        if status == "not_easy":
+            status, notes, needs_input = _go_external()
     else:
         status, notes, needs_input = easy_apply(
             session, settings, job.as_row(), settings.intake, llm, upload)
@@ -159,5 +215,34 @@ def _resume_for_upload(settings: Settings, generated: str) -> Path | None:
     upload = finalize_resume_for_upload(settings, generated)
     if upload is not None:
         return upload
-    master = settings.master_resume_file
+    master = settings.resolve_master_resume()
     return master if master.exists() else None
+
+
+def _explain_no_candidates(
+    db: Database,
+    settings: Settings,
+    only_approved: bool,
+    job_ids: list[str] | None = None,
+) -> str:
+    if job_ids:
+        return (
+            f"None of the {len(job_ids)} selected job(s) are eligible "
+            f"(already applied/skipped/closed, below score {settings.match_threshold}, "
+            "or still blocked in human review)."
+        )
+    if not only_approved:
+        return "No jobs matched apply filters (score threshold or status)."
+    with db.session() as s:
+        approved = list(
+            s.execute(select(Job).where(Job.approved.is_(True))).scalars().all()
+        )
+    terminal = {st.value for st in TERMINAL_STATUSES}
+    active = [j for j in approved if j.status not in terminal]
+    if not active:
+        return "No approved jobs to apply to — approve jobs in the grid first."
+    if all((j.match_score or 0) < settings.match_threshold for j in active):
+        return (
+            f"All approved jobs score below MATCH_THRESHOLD ({settings.match_threshold})."
+        )
+    return "No eligible approved jobs right now (check status filters)."

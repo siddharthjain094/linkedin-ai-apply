@@ -72,8 +72,11 @@ def scrape_search(session, settings: Settings, title: str, location: str) -> lis
     sc = settings.search
     page = session.page
     url = build_url(title, location, sc)
-    page.goto(url, wait_until="domcontentloaded")
-    human_delay(settings.min_delay_ms, settings.max_delay_ms)
+    if hasattr(session, "navigate"):
+        session.navigate(url, progress=getattr(session, "_progress", None))
+    else:
+        page.goto(url, wait_until="domcontentloaded")
+        human_delay(settings.min_delay_ms, settings.max_delay_ms)
 
     found: dict[str, dict] = {}
     target = sc.max_jobs_per_search
@@ -164,8 +167,11 @@ def fetch_description(session, settings: Settings, job: dict) -> dict:
     complete text, not LinkedIn's truncated preview."""
     page = session.page
     try:
-        page.goto(job["url"], wait_until="domcontentloaded")
-        human_delay(settings.min_delay_ms, settings.max_delay_ms)
+        if hasattr(session, "navigate"):
+            session.navigate(job["url"], progress=getattr(session, "_progress", None))
+        else:
+            page.goto(job["url"], wait_until="domcontentloaded")
+            human_delay(settings.min_delay_ms, settings.max_delay_ms)
         # The job detail pane renders after the initial DOM; wait for any known
         # description container (best-effort, never fatal).
         try:

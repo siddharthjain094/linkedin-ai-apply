@@ -33,6 +33,10 @@ class Database:
                 )
             if "approved" not in existing:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN approved BOOLEAN DEFAULT 0"))
+            if "use_master_resume" not in existing:
+                conn.execute(
+                    text("ALTER TABLE jobs ADD COLUMN use_master_resume BOOLEAN DEFAULT 0")
+                )
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -144,12 +148,61 @@ class Database:
             return jobs
 
     def set_approved(self, job_id: str, value: bool = True) -> bool:
-        """Approve/unapprove one job. Returns True if the job exists."""
+        """Approve/unapprove one job. Returns True if the job exists.
+
+        Approving a job parked in ``human_review`` marks it resolved so
+        ``apply --only-approved`` can retry it."""
         with self.session() as s:
             job = self.get(s, job_id)
             if job is None:
                 return False
             job.approved = value
+            if value and job.status == Status.human_review.value:
+                job.review_resolved = True
+            return True
+
+    def resolve_approved_human_review(self) -> int:
+        """Let approved human_review jobs be retried on the next apply run."""
+        with self.session() as s:
+            jobs = list(
+                s.execute(
+                    select(Job).where(
+                        Job.approved.is_(True),
+                        Job.status == Status.human_review.value,
+                        Job.review_resolved.is_(False),
+                    )
+                ).scalars().all()
+            )
+            for job in jobs:
+                job.review_resolved = True
+            return len(jobs)
+
+    def resolve_human_review_for(self, job_ids: Iterable[str]) -> int:
+        """Mark specific human_review jobs resolved so apply can retry them."""
+        wanted = set(job_ids)
+        if not wanted:
+            return 0
+        with self.session() as s:
+            jobs = list(
+                s.execute(
+                    select(Job).where(
+                        Job.job_id.in_(wanted),
+                        Job.status == Status.human_review.value,
+                        Job.review_resolved.is_(False),
+                    )
+                ).scalars().all()
+            )
+            for job in jobs:
+                job.review_resolved = True
+            return len(jobs)
+
+    def set_use_master_resume(self, job_id: str, value: bool = True) -> bool:
+        """Choose master vs tailored resume for apply. Returns True if the job exists."""
+        with self.session() as s:
+            job = self.get(s, job_id)
+            if job is None:
+                return False
+            job.use_master_resume = value
             return True
 
     def approve_all_generated(self) -> int:

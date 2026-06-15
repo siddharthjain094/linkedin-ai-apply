@@ -84,3 +84,39 @@ def test_resolved_human_review_is_picked_up(tmp_path):
     assert {j.job_id for j in db.pending_for_apply()} == {"1"}
     # And it no longer shows up as awaiting review.
     assert {j.job_id for j in db.human_review_jobs(unresolved_only=True)} == set()
+
+
+def test_approve_human_review_marks_resolved(tmp_path):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([_job("1")])
+    db.update("1", status=Status.human_review.value, review_resolved=False, match_score=95)
+    db.set_approved("1", True)
+    with db.session() as s:
+        job = db.get(s, "1")
+        assert job.review_resolved is True
+    assert {j.job_id for j in db.pending_for_apply()} == {"1"}
+
+
+def test_resolve_approved_human_review(tmp_path):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([_job("1"), _job("2")])
+    db.update("1", status=Status.human_review.value, review_resolved=False,
+              match_score=95, approved=True)
+    db.update("2", status=Status.human_review.value, review_resolved=False,
+              match_score=95, approved=False)
+    assert db.resolve_approved_human_review() == 1
+    with db.session() as s:
+        assert db.get(s, "1").review_resolved is True
+        assert db.get(s, "2").review_resolved is False
+
+
+def test_resolve_human_review_for(tmp_path):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([_job("1"), _job("2")])
+    db.update("1", status=Status.human_review.value, review_resolved=False, match_score=95)
+    db.update("2", status=Status.human_review.value, review_resolved=False, match_score=95)
+    assert db.resolve_human_review_for(["2"]) == 1
+    with db.session() as s:
+        assert db.get(s, "1").review_resolved is False
+        assert db.get(s, "2").review_resolved is True
+    assert {j.job_id for j in db.pending_for_apply()} == {"2"}

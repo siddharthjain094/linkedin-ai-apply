@@ -20,6 +20,7 @@ COLUMNS = [
     "apply_type",
     "status",
     "approved",
+    "use_master_resume",
     "needs_input",
     "review_resolved",
     "resume_path",

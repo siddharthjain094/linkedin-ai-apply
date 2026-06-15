@@ -77,6 +77,8 @@ class Job(Base):
     # let the user review/edit them, then they approve the subset they actually
     # want submitted. `apply --only-approved` acts only on approved jobs.
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When True, apply uploads the user's master resume instead of the tailored draft.
+    use_master_resume: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -95,6 +97,7 @@ class Job(Base):
             "apply_type": self.apply_type,
             "status": self.status,
             "approved": "yes" if self.approved else "",
+            "use_master_resume": "yes" if self.use_master_resume else "",
             "needs_input": self.needs_input,
             "review_resolved": "yes" if self.review_resolved else "",
             "resume_path": self.resume_path,

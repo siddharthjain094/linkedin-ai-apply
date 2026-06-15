@@ -85,6 +85,89 @@ def test_closed_job_is_marked_terminal(tmp_path, monkeypatch):
     assert all(j.job_id != "1" for j in db.pending_for_apply())
 
 
+def test_external_linkedin_tries_easy_first(tmp_path, monkeypatch):
+    db = _seed(tmp_path, "external")
+    calls = _patch(monkeypatch,
+                   easy_ret=("applied", "ok", []),
+                   ext_ret=("applied", "ext ok", []))
+    stats = apply_mod.run_apply(session=None, settings=Settings(), db=db, llm=object())
+    assert (calls["easy"], calls["external"]) == (1, 0)
+    assert stats["applied"] == 1
+
+
+def test_external_linkedin_falls_back_when_not_easy(tmp_path, monkeypatch):
+    db = _seed(tmp_path, "external")
+    calls = _patch(monkeypatch,
+                   easy_ret=("not_easy", "no easy button", []),
+                   ext_ret=("applied", "ok", []))
+    apply_mod.run_apply(session=None, settings=Settings(), db=db, llm=object())
+    assert (calls["easy"], calls["external"]) == (1, 1)
+
+
+def test_closed_from_external_route(tmp_path, monkeypatch):
+    db = _seed(tmp_path, "external")
+    calls = _patch(monkeypatch,
+                   easy_ret=("not_easy", "no easy button", []),
+                   ext_ret=("closed", "No longer accepting applications.", []))
+    stats = apply_mod.run_apply(session=None, settings=Settings(), db=db, llm=object())
+    assert calls["easy"] == 1
+    assert calls["external"] == 1
+    assert stats["closed"] == 1
+    with db.session() as s:
+        assert db.get(s, "1").status == Status.closed.value
+
+
+def test_apply_uses_master_resume_when_flagged(tmp_path, monkeypatch):
+    master = tmp_path / "profile" / "master_resume.pdf"
+    master.parent.mkdir(parents=True)
+    master.write_bytes(b"%PDF-1.4 test")
+    db = _seed(tmp_path, "easy")
+    db.update("1", use_master_resume=True)
+    uploaded = {}
+
+    def fake_easy(session, settings, job, intake, llm, resume_path):
+        uploaded["path"] = resume_path
+        return "applied", "ok", []
+
+    monkeypatch.setattr(apply_mod, "generate_documents", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(apply_mod, "easy_apply", fake_easy)
+    monkeypatch.setattr(apply_mod, "external_apply", lambda *a, **k: ("applied", "ok", []))
+
+    settings = Settings(master_resume_path=str(master))
+    stats = apply_mod.run_apply(session=None, settings=settings, db=db, llm=object())
+    assert stats["applied"] == 1
+    assert uploaded["path"] == master
+
+
+def test_apply_selected_job_ids_only(tmp_path, monkeypatch):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([
+        {"job_id": "1", "title": "A", "company": "X", "location": "R",
+         "url": "https://www.linkedin.com/jobs/view/1/", "description": "d",
+         "source": "search", "apply_type": "easy"},
+        {"job_id": "2", "title": "B", "company": "Y", "location": "R",
+         "url": "https://www.linkedin.com/jobs/view/2/", "description": "d",
+         "source": "search", "apply_type": "easy"},
+    ])
+    db.update("1", match_score=90)
+    db.update("2", match_score=90)
+    seen = []
+
+    def fake_easy(session, settings, job, intake, llm, resume_path):
+        seen.append(job["job_id"])
+        return "applied", "ok", []
+
+    monkeypatch.setattr(apply_mod, "generate_documents", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(apply_mod, "easy_apply", fake_easy)
+    monkeypatch.setattr(apply_mod, "external_apply", lambda *a, **k: ("applied", "ok", []))
+
+    stats = apply_mod.run_apply(
+        session=None, settings=Settings(), db=db, llm=object(), job_ids=["2"])
+    assert seen == ["2"]
+    assert stats["applied"] == 1
+    assert stats["targeted"] == 1
+
+
 def test_review_mode_drafts_only(tmp_path, monkeypatch):
     db = _seed(tmp_path, "easy")
     calls = _patch(monkeypatch)

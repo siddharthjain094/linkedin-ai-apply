@@ -49,7 +49,7 @@ def score_jobs(
     should_stop: Optional[Callable[[], bool]] = None,
 ) -> dict:
     try:
-        resume = cached_resume_text(str(settings.master_resume_file))
+        resume = cached_resume_text(str(settings.resolve_master_resume()))
     except Exception as exc:
         console.log(f"[red]Could not read master resume ({exc}); cannot score jobs. "
                     f"Set MASTER_RESUME_PATH / drop your resume and retry.[/]")

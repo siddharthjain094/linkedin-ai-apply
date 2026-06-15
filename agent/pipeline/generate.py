@@ -42,7 +42,7 @@ def _contact_line(intake: dict) -> tuple[str, str]:
 def generate_documents(settings: Settings, llm: LLMClient, job) -> tuple[str, str]:
     """Returns (resume_path, cover_letter_path) as strings ('' if a step failed)."""
     try:
-        resume_text = cached_resume_text(str(settings.master_resume_file))
+        resume_text = cached_resume_text(str(settings.resolve_master_resume()))
     except Exception:
         # No readable resume -> we can't tailor documents; the apply phase will
         # fall back to uploading the master resume (if any) without tailoring.
@@ -117,6 +117,18 @@ def finalize_resume_for_upload(settings: Settings, resume_path: str) -> Path | N
         if pdf:
             return pdf
     return p
+
+
+def master_resume_for_upload(settings: Settings) -> Path | None:
+    """Return the user's master resume in the format needed for upload."""
+    master = settings.resolve_master_resume()
+    if not master.exists():
+        return None
+    if settings.resume_output_format == "pdf" and master.suffix.lower() == ".docx":
+        pdf = builder.to_pdf(master)
+        if pdf:
+            return pdf
+    return master
 
 
 def generate_all(

@@ -11,12 +11,23 @@ fields that blocked us (empty unless status == "human_review").
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from agent.browser.finders import human_delay, try_click
 from agent.browser.forms import resolve_answer
+from agent.browser.job_page import (
+    already_applied,
+    find_linkedin_apply_button,
+    is_linkedin_job_url,
+    no_longer_accepting,
+    safe_close_page,
+    wait_for_apply_button,
+)
 from agent.config import Settings
 from agent.llm.provider import LLMClient
+
+logger = logging.getLogger(__name__)
 
 MODAL = "div.jobs-easy-apply-modal, div[data-test-modal]"
 MAX_STEPS = 14
@@ -32,28 +43,57 @@ def easy_apply(
 ) -> tuple[str, str, list[dict]]:
     page = session.page
     try:
-        page.goto(job["url"], wait_until="domcontentloaded")
-        human_delay(settings.min_delay_ms, settings.max_delay_ms)
+        if hasattr(session, "navigate"):
+            session.navigate(job["url"], progress=getattr(session, "_progress", None))
+        else:
+            page.goto(job["url"], wait_until="domcontentloaded")
+            human_delay(settings.min_delay_ms, settings.max_delay_ms)
     except Exception as exc:
         return "error", f"navigation failed: {exc}", []
 
     # Restart/idempotency guard: if LinkedIn already shows this as applied, do not
     # resubmit (a prior run may have submitted then crashed before recording it).
-    if _already_applied(page):
+    if already_applied(page):
         return "applied", "Already applied (detected on job page).", []
 
     # Closed posting: nothing we can do, mark it terminal so we never retry.
-    if _no_longer_accepting(page):
+    if no_longer_accepting(page):
         return "closed", "No longer accepting applications.", []
 
-    if not try_click(page, "button.jobs-apply-button:has-text('Easy Apply'), "
-                           "button[aria-label*='Easy Apply'], button:has-text('Easy Apply')",
-                     timeout=6000):
-        # Not an Easy Apply job (or button missing). Signal the caller to try the
-        # external/AI path instead of parking it.
-        return "not_easy", "No Easy Apply button (likely external).", []
+    wait_for_apply_button(page)
+    apply_btn = find_linkedin_apply_button(page)
+    if apply_btn is None:
+        hint = ""
+        try:
+            url = (page.url or "").lower()
+            if "login" in url or "authwall" in url:
+                hint = " (not logged in — run `linkedin-apply login`)"
+        except Exception:
+            pass
+        from agent.browser.job_page import save_apply_debug_screenshot
+        shot = save_apply_debug_screenshot(settings, job.get("job_id", "job"), page)
+        extra = f" Screenshot: {shot}" if shot else ""
+        return "not_easy", f"No Apply / Easy Apply button on job page.{hint}{extra}", []
+
+    try:
+        apply_btn.scroll_into_view_if_needed(timeout=5000)
+        apply_btn.click(timeout=8000)
+    except Exception as exc:
+        return "not_easy", f"Could not click Apply button: {exc}", []
 
     human_delay(settings.min_delay_ms, settings.max_delay_ms)
+
+    try:
+        page.locator(MODAL).first.wait_for(state="visible", timeout=6000)
+    except Exception:
+        ext = _external_tab(page)
+        if ext is not None:
+            # Close the old LinkedIn job page before switching to the external tab
+            # to prevent tab accumulation across jobs.
+            safe_close_page(page)
+            session.page = ext
+            return "not_easy", "External apply tab opened from LinkedIn.", []
+        return "not_easy", "Apply clicked but no Easy Apply modal opened (likely external).", []
 
     for _ in range(MAX_STEPS):
         if page.locator(MODAL).count() == 0:
@@ -95,31 +135,17 @@ def easy_apply(
     return "human_review", "Easy Apply flow did not reach submit.", []
 
 
-def _already_applied(page) -> bool:
-    """Detect LinkedIn's 'Applied' state so we never submit twice."""
-    try:
-        return page.locator(
-            "span.artdeco-inline-feedback--success:has-text('Applied'), "
-            "div.jobs-s-apply--applied, "
-            "button.jobs-apply-button[disabled]:has-text('Applied')"
-        ).count() > 0
-    except Exception:
-        return False
-
-
-def _no_longer_accepting(page) -> bool:
-    """Detect LinkedIn's 'No longer accepting applications' banner (job closed)."""
-    phrase = "No longer accepting applications"
-    try:
-        if page.get_by_text(phrase, exact=False).count() > 0:
-            return True
-    except Exception:
-        pass
-    try:
-        body = (page.inner_text("body", timeout=2000) or "").lower()
-        return phrase.lower() in body
-    except Exception:
-        return False
+def _external_tab(page):
+    # Search from the end to prefer the most recently opened tab.
+    for p in reversed(page.context.pages):
+        if p is page:
+            continue
+        try:
+            if not is_linkedin_job_url(p.url or ""):
+                return p
+        except Exception:
+            continue
+    return None
 
 
 def _footer_has(page, text: str) -> bool:
@@ -137,10 +163,24 @@ def _fill_visible_fields(page, settings, intake, llm, resume_path) -> list[dict]
     # Resume upload, if the step asks for it.
     if resume_path and page.locator("input[type='file']").count() > 0:
         try:
-            page.locator("input[type='file']").first.set_input_files(str(resume_path))
-            human_delay(settings.min_delay_ms, settings.max_delay_ms)
-        except Exception:
-            pass
+            if not resume_path.exists():
+                logger.warning("Resume file not found for upload: %s", resume_path)
+            else:
+                file_input = page.locator("input[type='file']").first
+                file_input.set_input_files(str(resume_path))
+                human_delay(settings.min_delay_ms, settings.max_delay_ms)
+                # Verify the file was actually attached to the input.
+                try:
+                    file_count = file_input.evaluate("el => el.files?.length || 0")
+                    if file_count == 0:
+                        logger.warning(
+                            "Resume upload: set_input_files succeeded but "
+                            "no files attached to input element"
+                        )
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("Resume upload failed for %s: %s", resume_path, exc)
 
     groups = page.locator("div.jobs-easy-apply-form-section__grouping, "
                           "div.fb-dash-form-element, div[data-test-form-element]")

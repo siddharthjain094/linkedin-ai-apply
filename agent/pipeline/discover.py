@@ -19,6 +19,7 @@ def discover(
     settings: Settings,
     db: Database,
     should_stop: Optional[Callable[[], bool]] = None,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
     sc = settings.search
     known = db.known_job_ids()
@@ -45,7 +46,10 @@ def discover(
                     stopped = True
                     break
                 _guard()
-                console.log(f"Searching: '{title}' in '{location}'")
+                msg = f"Searching LinkedIn: {title} in {location}"
+                console.log(msg)
+                if progress:
+                    progress(msg)
                 try:
                     for job in search.scrape_search(session, settings, title, location):
                         collected.setdefault(job["job_id"], job)
@@ -73,6 +77,8 @@ def discover(
                 continue
             if jid not in known or jid in missing_desc:
                 _guard()
+                if progress:
+                    progress(f"Opening job page: {job.get('title', jid)}")
                 search.fetch_description(session, settings, job)
     finally:
         # Persist whatever we collected, even on an early stop or logout (partial).

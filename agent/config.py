@@ -132,6 +132,21 @@ class Settings(BaseModel):
     def master_resume_file(self) -> Path:
         return self._abs(self.master_resume_path)
 
+    def resolve_master_resume(self) -> Path:
+        """Return the master resume on disk (.docx / .pdf / .txt)."""
+        preferred = self.master_resume_file
+        if preferred.exists():
+            return preferred
+        for ext in (".pdf", ".docx", ".txt"):
+            alt = preferred.with_suffix(ext)
+            if alt.exists():
+                return alt
+        return preferred
+
+    @property
+    def intake_file(self) -> Path:
+        return self._abs(self.intake_path)
+
     @property
     def learned_answers_file(self) -> Path:
         return self._abs(self.learned_answers_path)

@@ -124,25 +124,46 @@ QUESTION: {question}
 Return JSON: {{"answer": <string|number|null>, "confidence": <0-1>}}"""
 
 
-EXTERNAL_PLAN_SYSTEM = """You are a web-automation planner. Given a simplified DOM \
-snapshot of an external job-application page and a candidate profile, decide the next \
-single action to progress the application. Prefer filling known fields and clicking \
-next/submit. If a CAPTCHA, login wall, OTP, or a required field you cannot answer is \
-present, stop and request human review."""
+EXTERNAL_PLAN_SYSTEM = """You are a smart web-automation agent applying to jobs on \
+external company sites (Greenhouse, Lever, Workday, Ashby, etc.).
+
+You receive:
+- The candidate profile (JSON)
+- The current page URL
+- A readable excerpt of visible page text (headings, instructions, errors)
+- A numbered list of interactive elements currently on screen
+
+Decide the **single next action** that best progresses the application. Strategy:
+1. Read the page text first — understand which step you're on (personal info, resume, \
+screening questions, review, etc.).
+2. Fill empty required fields from the profile before clicking Next/Continue.
+3. Use ``scroll`` when you suspect more fields/buttons are below the fold.
+4. Click Next / Continue / Submit when the current step looks complete.
+5. Use ``upload_resume`` when a resume upload field is present and empty.
+6. Return ``finish`` only after a clear confirmation (e.g. "Application submitted", \
+"Thank you for applying") — not merely after clicking Submit.
+7. Return ``human_review`` for CAPTCHA, login walls, OTP, or a required field you \
+cannot answer from the profile."""
 
 EXTERNAL_PLAN_USER = """CANDIDATE PROFILE (JSON):
 {profile}
 
+JOB: {job}
 PAGE URL: {url}
-INTERACTIVE ELEMENTS (indexed):
+STEP: {step} of {max_steps}
+
+VISIBLE PAGE TEXT (read this for context):
+{page_text}
+
+INTERACTIVE ELEMENTS (indexed — only these can be targeted):
 {elements}
 
 Return JSON describing the next action:
 {{
-  "action": "fill" | "click" | "select" | "upload_resume" | "finish" | "human_review",
+  "action": "fill" | "click" | "select" | "scroll" | "upload_resume" | "finish" | "human_review",
   "target_index": <int or null>,
   "value": "<text to type / option to choose, or null>",
-  "reason": "<short>",
+  "reason": "<short: what you see and why this action>",
   "question": "<if action is human_review because of a required field you cannot answer, \
 the exact question/label so the user can supply it; otherwise null>"
 }}"""

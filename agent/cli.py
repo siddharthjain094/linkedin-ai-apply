@@ -87,7 +87,7 @@ def _extract_from_resume(settings: Settings) -> dict:
     Falls back gracefully: if there's no resume, parsing fails, or no LLM is
     configured, returns whatever could be found (possibly just regex contact
     details, or {})."""
-    resume = settings.master_resume_file
+    resume = settings.resolve_master_resume()
     if not resume.exists():
         console.print(f"[dim]No resume at {resume}; you'll be asked for everything.[/]\n")
         return {}

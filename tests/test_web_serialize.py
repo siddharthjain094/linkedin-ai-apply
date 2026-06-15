@@ -20,11 +20,12 @@ def test_serialize_job_shape(tmp_path, monkeypatch):
         "job_id": "1", "title": "Eng", "company": "Acme", "location": "Remote",
         "url": "https://x/1", "description": "d", "source": "search",
     }])
-    db.update("1", match_score=88, approved=True)
+    db.update("1", match_score=88, approved=True, use_master_resume=True)
     with db.session() as s:
         row = serialize_job(db.get(s, "1"), settings)
     assert row["job_id"] == "1"
     assert row["approved"] is True
+    assert row["use_master_resume"] is True
     assert row["match_score"] == 88
     assert row["resume_exists"] is False         # no doc generated yet
     assert "id" in row and "resume_filename" in row
