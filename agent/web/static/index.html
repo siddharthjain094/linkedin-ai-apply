@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>linkedin-ai-apply</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>linkedin&#8209;ai&#8209;apply</h1>
+    </div>
+    <div class="actions">
+      <button id="btn-find" class="btn">Fetch jobs</button>
+      <button id="btn-generate" class="btn">Generate drafts</button>
+      <button id="btn-apply" class="btn btn-primary">Apply approved</button>
+      <button id="btn-stop" class="btn btn-stop" hidden>Stop</button>
+    </div>
+    <div id="run-status" class="run-status idle">idle</div>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="runs">
+    <button id="btn-runs" class="linklike">Recent runs &#9662;</button>
+    <div id="runs-panel" hidden></div>
+  </section>
+
+  <section class="filters">
+    <input id="f-search" type="search" placeholder="Search title or company&hellip;" />
+    <select id="f-status">
+      <option value="">All statuses</option>
+      <option value="new">new</option>
+      <option value="generated">generated</option>
+      <option value="applied">applied</option>
+      <option value="human_review">human_review</option>
+      <option value="skipped">skipped</option>
+      <option value="error">error</option>
+    </select>
+    <label class="minscore">
+      Min score
+      <input id="f-score" type="number" min="0" max="100" step="5" value="0" />
+    </label>
+    <label class="chk"><input id="f-approved" type="checkbox" /> Approved only</label>
+    <label class="chk"><input id="f-hasresume" type="checkbox" /> Has resume</label>
+    <span class="spacer"></span>
+    <span id="selcount" class="selcount">0 selected</span>
+    <button id="btn-approve" class="btn btn-ok">Approve selected</button>
+    <button id="btn-reject" class="btn btn-warn">Reject selected</button>
+  </section>
+
+  <main>
+    <table id="grid">
+      <thead>
+        <tr>
+          <th class="c-check"><input id="check-all" type="checkbox" /></th>
+          <th class="c-title sortable" data-sort="title">Title</th>
+          <th class="sortable" data-sort="company">Company</th>
+          <th>Location</th>
+          <th class="sortable" data-sort="match_score">Score</th>
+          <th class="sortable" data-sort="apply_type">Type</th>
+          <th class="sortable" data-sort="status">Status</th>
+          <th>Approved</th>
+          <th>Docs</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>No jobs match. Try <b>Fetch jobs</b> or relax filters.</p>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

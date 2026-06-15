@@ -1,0 +1,95 @@
+[project]
+name = "linkedin-ai-apply"
+version = "0.1.0"
+description = "AI agent that finds matching LinkedIn jobs, writes a tailored resume + cover letter per job, and auto-applies (Easy Apply + external portals)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "linkedin-ai-apply contributors" }]
+keywords = [
+    "linkedin",
+    "job-search",
+    "job-application",
+    "auto-apply",
+    "easy-apply",
+    "ai",
+    "llm",
+    "resume",
+    "cover-letter",
+    "automation",
+    "playwright",
+    "agent",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "playwright>=1.44",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.6",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "python-docx>=1.1",
+    "pdfminer.six>=20231228",
+    "litellm>=1.40",
+    "tenacity>=8.3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+# Optional, used only when RESUME_OUTPUT_FORMAT=pdf and docx2pdf path is chosen.
+pdf = [
+    "docx2pdf>=0.1.8",
+]
+# Optional local web UI (linkedin-apply ui).
+ui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/linkedin-ai-apply"
+Repository = "https://github.com/your-org/linkedin-ai-apply"
+Issues = "https://github.com/your-org/linkedin-ai-apply/issues"
+Changelog = "https://github.com/your-org/linkedin-ai-apply/blob/main/CHANGELOG.md"
+
+[project.scripts]
+linkedin-apply = "agent.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+
+[tool.setuptools.package-data]
+"agent.web" = ["static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

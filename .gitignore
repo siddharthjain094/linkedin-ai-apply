@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Secrets & per-user data
+profile/intake.yaml
+profile/learned_answers.yaml
+profile/master_resume.docx
+profile/master_resume.pdf
+profile/master_resume.tex
+
+# Runtime data / generated artifacts
+data/
+output/
+browser_profile/
+browser_profile_chrome/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store

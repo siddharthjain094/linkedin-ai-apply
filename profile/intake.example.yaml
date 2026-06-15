@@ -1,0 +1,57 @@
+# Per-user intake. Copy to intake.yaml (or run `linkedin-apply intake`).
+# This is the single file you hand to another person so the bot can apply
+# on their behalf. Nothing here is secret except where noted.
+
+personal:
+  full_name: "Jane Doe"
+  email: "jane@example.com"
+  phone: "+1 555 010 0101"
+  city: "San Francisco"
+  state: "CA"
+  country: "United States"
+
+links:
+  linkedin: "https://www.linkedin.com/in/janedoe"
+  github: "https://github.com/janedoe"
+  portfolio: "https://janedoe.dev"
+
+eligibility:
+  work_authorization: "Authorized to work in the US"
+  requires_visa_sponsorship: false
+  willing_to_relocate: true
+  notice_period_days: 14
+  earliest_start: "Immediately"
+
+compensation:
+  expected_salary: 160000
+  currency: "USD"
+
+experience:
+  total_years: 6
+  current_title: "Senior Software Engineer"
+  current_company: "Acme"
+
+# Default answers for common screening questions. The form filler looks here
+# FIRST (substring/keyword match on the question), then falls back to the LLM.
+screening_answers:
+  "years of experience": "6"
+  "authorized to work": "Yes"
+  "require sponsorship": "No"
+  "willing to relocate": "Yes"
+  "notice period": "2 weeks"
+  "expected salary": "160000"
+  "do you have a degree": "Yes"
+
+# Optional EEO/diversity answers. Leave blank to let the bot select
+# "Decline to self identify" where possible.
+eeo:
+  gender: "Decline to self identify"
+  race: "Decline to self identify"
+  veteran_status: "Decline to self identify"
+  disability_status: "Decline to self identify"
+
+# Optional: override the search block from config.yaml per person.
+# search:
+#   titles: ["Data Engineer"]
+#   locations: ["Remote"]
+#   match_threshold: 75

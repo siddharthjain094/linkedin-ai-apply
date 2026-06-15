@@ -1,0 +1,45 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please scrub any personal data or credentials from logs/screenshots.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `linkedin-apply ...`
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: phase
+    attributes:
+      label: Which phase / command?
+      placeholder: "find / generate / apply / daily / ui / review"
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: |
+        - OS:
+        - Python version:
+        - LLM_MODEL:
+        - Browser mode (bundled Chromium / system Chrome):
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshot
+      description: Relevant output (scrubbed). If a selector broke, include the job URL pattern.

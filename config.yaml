@@ -1,0 +1,50 @@
+# Non-secret defaults. .env overrides these; CLI flags override both.
+# Secrets (API keys, LinkedIn password) belong in .env, NOT here.
+
+submit_mode: auto          # auto | easy_only | review
+dry_run: false
+
+match_threshold: 70
+max_applies_per_run: 20
+min_delay_ms: 1200
+max_delay_ms: 4200
+
+headless: false
+login_mode: persistent     # persistent | credentials
+browser_profile_dir: browser_profile
+
+llm_model: openai/gpt-4o-mini
+llm_temperature: 0.4
+
+enable_hiring_posts: true
+resume_output_format: pdf  # pdf | docx
+
+# Search definition (can also live in intake.yaml under `search:`).
+search:
+  titles:
+    - "Senior Software Engineer"
+    - "Staff Software Engineer"
+  keywords: ""             # extra boolean keywords, optional
+  locations:
+    - "United States"
+    - "Seattle, Washington, United States"
+  remote: true             # include remote roles
+  on_site: false
+  hybrid: true
+  experience_levels:       # entry | associate | mid-senior | director | executive | internship
+    - mid-senior
+  date_posted: past-week   # past-24h | past-week | past-month | any
+  easy_apply_only: false
+  max_jobs_per_search: 25
+
+blacklist_companies: []
+blacklist_title_keywords:
+  - "Clearance"
+  - "Senior Director"
+
+# Paths
+db_path: data/state.db
+sheet_path: data/jobs.xlsx
+master_resume_path: profile/master_resume.pdf
+intake_path: profile/intake.yaml
+output_dir: output
