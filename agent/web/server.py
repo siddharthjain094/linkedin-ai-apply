@@ -233,7 +233,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/profile")
     def profile() -> dict:
-        return {"intake": _settings().intake or {}}
+        settings = _settings()
+        return {
+            "intake": settings.intake or {},
+            "intake_path": str(settings.intake_file),
+        }
 
     @app.get("/api/runs")
     def runs() -> dict:

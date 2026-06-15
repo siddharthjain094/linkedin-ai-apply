@@ -87,6 +87,73 @@ async function loadRuns() {
   panel.innerHTML = `<table><thead>${head}</thead><tbody>${rows}</tbody></table>`;
 }
 
+function intakeSection(title, entries) {
+  const items = Object.entries(entries || {});
+  if (!items.length) {
+    return `<div class="intake-section"><h3>${esc(title)}</h3><div class="intake-empty">(empty)</div></div>`;
+  }
+  const rows = items.map(([k, v]) =>
+    `<dt>${esc(k)}</dt><dd>${esc(v == null ? "" : v)}</dd>`).join("");
+  return `<div class="intake-section"><h3>${esc(title)}</h3><dl class="intake-kv">${rows}</dl></div>`;
+}
+
+async function loadIntake() {
+  const panel = $("intake-content");
+  if (!panel) return;
+  try {
+    const data = await api("/api/profile");
+    const intake = data.intake || {};
+    if (!Object.keys(intake).length) {
+      panel.innerHTML = `<div class="intake-empty">No intake yet. Use <b>Replace master</b> in the bar above, add <code>profile/intake.yaml</code>, or run <code>linkedin-apply intake</code> in a terminal.</div>`;
+      return;
+    }
+    const path = data.intake_path ? `<code>${esc(data.intake_path)}</code>` : "";
+    const meta = path
+      ? `<div class="intake-meta">Loaded from ${path}. Edit that file or re-upload resume, then click <b>Intake &amp; resume</b> to refresh.</div>`
+      : "";
+    const sections = [
+      intakeSection("Personal", intake.personal),
+      intakeSection("Links", intake.links),
+      intakeSection("Eligibility", intake.eligibility),
+      intakeSection("Compensation", intake.compensation),
+      intakeSection("Experience", intake.experience),
+      intakeSection("Screening answers", intake.screening_answers),
+      intakeSection("EEO / diversity", intake.eeo),
+    ];
+    if (intake.search) sections.push(intakeSection("Search overrides", intake.search));
+    panel.innerHTML = meta + sections.join("");
+  } catch (e) {
+    panel.innerHTML = `<div class="intake-empty">Could not load intake: ${esc(e.message)}</div>`;
+  }
+}
+
+function setPipelineActive(stepId) {
+  document.querySelectorAll(".pipeline-step").forEach((el) => {
+    const on = stepId && el.id === stepId;
+    el.classList.toggle("active", on);
+    el.classList.remove("running");
+  });
+}
+
+function setPipelineRunning(action) {
+  const map = { find: "btn-find", generate: "btn-generate", apply: "btn-apply" };
+  const runningId = map[action];
+  document.querySelectorAll(".pipeline-step").forEach((el) => {
+    el.classList.remove("running");
+    if (runningId && el.id === runningId) el.classList.add("running");
+  });
+}
+
+function toggleIntakePanel(forceOpen) {
+  const panel = $("intake-panel");
+  const btn = $("btn-intake");
+  const open = forceOpen === true ? true : forceOpen === false ? false : panel.hidden;
+  panel.hidden = !open;
+  btn.classList.toggle("active", open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) loadIntake();
+}
+
 // ---- filtering + rendering ------------------------------------------------
 
 function filtered() {
@@ -234,6 +301,8 @@ async function replaceMasterResume(file) {
     : "";
   toast(`Replaced master resume with ${data.name}.${intakeMsg}`);
   await loadJobs();
+  loadIntake();
+  toggleIntakePanel(true);
 }
 
 async function replaceJobResume(jobId, file) {
@@ -313,7 +382,13 @@ async function pollStatus() {
   const s = await api("/api/actions/status");
   const el = $("run-status");
   const busy = s.running;
-  ["btn-find", "btn-generate", "btn-apply", "btn-reset"].forEach((id) => ($(id).disabled = busy));
+  ["btn-find", "btn-generate", "btn-apply", "btn-reset", "btn-apply-bar"].forEach((id) => {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  });
+
+  if (busy) setPipelineRunning(s.action);
+  else setPipelineActive($("intake-panel").hidden ? null : "btn-intake");
 
   const stopBtn = $("btn-stop");
   stopBtn.hidden = !busy;
@@ -415,11 +490,12 @@ function wire() {
   $("btn-stop").addEventListener("click", stopAction);
   $("btn-reset").addEventListener("click", () =>
     resetAllData().catch((e) => toast(e.message, true)));
+  $("btn-intake").addEventListener("click", () => toggleIntakePanel());
   $("btn-runs").addEventListener("click", () => {
     const panel = $("runs-panel");
     panel.hidden = !panel.hidden;
     $("btn-runs").innerHTML = panel.hidden ? "Recent runs \u25BE" : "Recent runs \u25B4";
-    loadRuns();
+    if (!panel.hidden) loadRuns();
   });
 
   $("btn-replace-master").addEventListener("click", () => $("upload-master").click());
@@ -441,5 +517,7 @@ function wire() {
 }
 
 wire();
-loadJobs();
+loadJobs().then(() => {
+  loadIntake();
+});
 pollStatus();

@@ -7,37 +7,43 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <div class="site-header" id="site-header">
   <header class="topbar">
     <div class="brand">
       <span class="dot"></span>
       <h1>linkedin&#8209;ai&#8209;apply</h1>
     </div>
-    <div class="actions">
-      <button id="btn-find" class="btn">Fetch jobs</button>
-      <button id="btn-generate" class="btn">Generate drafts</button>
-      <button id="btn-apply" class="btn btn-primary">Apply selected</button>
-      <button id="btn-stop" class="btn btn-stop" hidden>Stop</button>
-    </div>
+    <nav class="pipeline" aria-label="Application pipeline">
+      <button id="btn-intake" type="button" class="pipeline-step active" aria-expanded="true">
+        <span class="pipeline-num">1</span>
+        Intake &amp; resume
+      </button>
+      <span class="pipeline-arrow" aria-hidden="true"></span>
+      <button id="btn-find" type="button" class="pipeline-step">
+        <span class="pipeline-num">2</span>
+        Fetch jobs
+      </button>
+      <span class="pipeline-arrow" aria-hidden="true"></span>
+      <button id="btn-generate" type="button" class="pipeline-step">
+        <span class="pipeline-num">3</span>
+        Generate drafts
+        <span class="pipeline-optional">optional</span>
+      </button>
+      <span class="pipeline-arrow" aria-hidden="true"></span>
+      <button id="btn-apply" type="button" class="pipeline-step pipeline-step-final">
+        <span class="pipeline-num">4</span>
+        Apply selected
+      </button>
+    </nav>
+    <button id="btn-stop" class="btn btn-stop" type="button" hidden>Stop</button>
     <div id="run-status" class="run-status idle">idle</div>
   </header>
 
-  <section class="toolbar">
-    <div class="master-bar">
-      <span class="master-bar-label">Master resume</span>
-      <span id="master-hint" class="master-hint"></span>
-      <button id="btn-replace-master" class="btn btn-sm" type="button" title="Replaces profile/master_resume and refreshes intake.yaml">Replace master&hellip;</button>
-    </div>
-    <input id="upload-master" type="file" accept=".docx,.pdf,.txt" hidden />
-    <input id="upload-job-resume" type="file" accept=".docx,.pdf" hidden />
-
-    <section class="runs">
-      <button id="btn-runs" class="linklike">Recent runs &#9662;</button>
-      <div id="runs-panel" hidden></div>
-      <button id="btn-reset" class="btn btn-sm btn-danger" type="button" title="Delete all jobs and run history from the database">Reset all data&hellip;</button>
-    </section>
+  <section class="resume-bar" aria-label="Master resume">
+    <span class="master-bar-label">Master resume</span>
+    <span id="master-hint" class="master-hint"></span>
+    <button id="btn-replace-master" class="btn btn-sm" type="button" title="Upload profile/master_resume and refresh intake.yaml">Replace master&hellip;</button>
   </section>
-
-  <section class="stats" id="stats"></section>
 
   <section class="filters">
     <input id="f-search" type="search" placeholder="Search title or company&hellip;" />
@@ -58,13 +64,31 @@
     <label class="chk"><input id="f-hasresume" type="checkbox" /> Has resume</label>
     <span class="spacer"></span>
     <span id="selcount" class="selcount">0 selected</span>
-    <span class="bulk-label">Apply selected with:</span>
+    <span class="bulk-label">Apply with:</span>
     <button id="btn-resume-tailored" class="btn btn-sm" title="Use each job's tailored resume when applying">Tailored draft</button>
     <button id="btn-resume-mine" class="btn btn-sm" title="Use your master resume when applying">My master</button>
     <button id="btn-approve" class="btn btn-ok">Approve selected</button>
-    <button id="btn-apply-bar" class="btn btn-primary btn-sm" title="Submit applications for checked rows">Apply selected</button>
     <button id="btn-reject" class="btn btn-warn">Reject selected</button>
+    <button id="btn-apply-bar" class="btn btn-primary btn-sm" title="Submit applications for checked rows">Apply selected</button>
   </section>
+  </div>
+
+  <div class="app-scroll">
+  <section id="intake-panel" class="pipeline-panel">
+    <p class="intake-panel-lead">Application profile (intake) — answers used on job application forms.</p>
+    <div id="intake-content" class="intake-content"></div>
+  </section>
+
+  <section class="subbar">
+    <button id="btn-runs" class="linklike" type="button">Recent runs &#9662;</button>
+    <button id="btn-reset" class="btn btn-sm btn-danger" type="button" title="Delete all jobs and run history from the database">Reset all data&hellip;</button>
+    <div id="runs-panel" class="side-panel" hidden></div>
+  </section>
+
+  <input id="upload-master" type="file" accept=".docx,.pdf,.txt" hidden />
+  <input id="upload-job-resume" type="file" accept=".docx,.pdf" hidden />
+
+  <section class="stats" id="stats"></section>
 
   <main>
     <table id="grid">
@@ -86,6 +110,7 @@
     </table>
     <p id="empty" class="empty" hidden>No jobs match. Try <b>Fetch jobs</b> or relax filters.</p>
   </main>
+  </div>
 
   <div id="toast" class="toast" hidden></div>
   <script src="/static/app.js"></script>
