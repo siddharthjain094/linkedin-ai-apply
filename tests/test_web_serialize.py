@@ -42,3 +42,29 @@ def test_under_output_rejects_paths_outside_output(tmp_path, monkeypatch):
     inside = settings.output_path / "resumes" / "ok.docx"
     inside.write_text("ok")
     assert _under_output(settings, str(inside)) is True
+
+
+def test_reset_api_clears_database(tmp_path, monkeypatch):
+    import agent.config as config
+    from fastapi.testclient import TestClient
+
+    from agent.web.server import create_app
+
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    settings = load_settings(env_file=str(tmp_path / ".env"))
+    settings.ensure_dirs()
+    db = Database(settings.db_file)
+    db.upsert_discovered([{
+        "job_id": "1", "title": "Eng", "company": "Acme", "location": "Remote",
+        "url": "https://x/1", "description": "d", "source": "search",
+    }])
+    db.log_run("discover", discovered=1)
+
+    client = TestClient(create_app())
+    res = client.post("/api/reset")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["jobs_deleted"] == 1
+    assert body["runs_deleted"] == 1
+    assert db.all_jobs() == []

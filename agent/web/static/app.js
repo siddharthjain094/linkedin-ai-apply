@@ -279,6 +279,23 @@ async function trigger(name, body) {
   }
 }
 
+async function resetAllData() {
+  const n = state.jobs.length;
+  const msg = n
+    ? `Delete all ${n} job(s) and run history from the database?\n\nGenerated resumes in output/ are kept. You can fetch jobs again from scratch.`
+    : "Delete all run history from the database and start fresh?";
+  if (!confirm(msg)) return;
+  try {
+    const r = await api("/api/reset", { method: "POST" });
+    state.selected.clear();
+    toast(`Reset complete (${r.jobs_deleted} jobs, ${r.runs_deleted} runs removed).`);
+    await loadJobs();
+    loadRuns();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 async function stopAction() {
   try {
     await api("/api/actions/stop", { method: "POST" });
@@ -296,7 +313,7 @@ async function pollStatus() {
   const s = await api("/api/actions/status");
   const el = $("run-status");
   const busy = s.running;
-  ["btn-find", "btn-generate", "btn-apply"].forEach((id) => ($(id).disabled = busy));
+  ["btn-find", "btn-generate", "btn-apply", "btn-reset"].forEach((id) => ($(id).disabled = busy));
 
   const stopBtn = $("btn-stop");
   stopBtn.hidden = !busy;
@@ -396,6 +413,8 @@ function wire() {
   $("btn-apply").addEventListener("click", () => applySelected().catch((e) => toast(e.message, true)));
   $("btn-apply-bar").addEventListener("click", () => applySelected().catch((e) => toast(e.message, true)));
   $("btn-stop").addEventListener("click", stopAction);
+  $("btn-reset").addEventListener("click", () =>
+    resetAllData().catch((e) => toast(e.message, true)));
   $("btn-runs").addEventListener("click", () => {
     const panel = $("runs-panel");
     panel.hidden = !panel.hidden;

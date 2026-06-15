@@ -120,3 +120,15 @@ def test_resolve_human_review_for(tmp_path):
         assert db.get(s, "1").review_resolved is False
         assert db.get(s, "2").review_resolved is True
     assert {j.job_id for j in db.pending_for_apply()} == {"2"}
+
+
+def test_clear_all_wipes_jobs_and_runs(tmp_path):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([_job("1"), _job("2")])
+    db.log_run("discover", discovered=2)
+    db.log_run("apply", applied=1)
+    counts = db.clear_all()
+    assert counts == {"jobs_deleted": 2, "runs_deleted": 2}
+    assert db.all_jobs() == []
+    assert db.recent_runs() == []
+    assert db.known_job_ids() == set()

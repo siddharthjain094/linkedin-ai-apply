@@ -271,3 +271,14 @@ class Database:
             for r in rows:
                 s.expunge(r)
             return rows
+
+    def clear_all(self) -> dict[str, int]:
+        """Delete every job and run-log row. Returns counts removed."""
+        with self.session() as s:
+            jobs = s.execute(select(Job)).scalars().all()
+            runs = s.execute(select(RunLog)).scalars().all()
+            for row in jobs:
+                s.delete(row)
+            for row in runs:
+                s.delete(row)
+            return {"jobs_deleted": len(jobs), "runs_deleted": len(runs)}

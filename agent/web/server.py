@@ -330,12 +330,20 @@ def create_app() -> FastAPI:
     def action_status() -> dict:
         return runner.snapshot()
 
-    @app.post("/api/actions/stop")
-    def action_stop() -> dict:
-        stopped = runner.request_stop()
-        if not stopped:
-            raise HTTPException(status_code=409, detail="nothing is running")
-        return runner.snapshot()
+    @app.post("/api/reset")
+    def reset_data() -> dict:
+        """Wipe all jobs and run history so the user can start fresh."""
+        if runner.running:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot reset while an action is running. Stop it first.",
+            )
+        settings = _settings()
+        db = _db(settings)
+        counts = db.clear_all()
+        from agent import sheet
+        sheet.export(db, settings.sheet_file)
+        return {"ok": True, **counts}
 
     @app.post("/api/actions/find", status_code=202)
     def action_find() -> dict:

@@ -42,6 +42,8 @@ body {
 .btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
 .btn-ok { border-color: #2c5a32; }
 .btn-warn { border-color: #5a4a1f; }
+.btn-danger { border-color: #8b3a3a; color: #ffb4b0; }
+.btn-danger:hover:not(:disabled) { background: rgba(248, 81, 73, 0.12); }
 .btn-stop { background: var(--danger); border-color: transparent; color: #fff; }
 .btn-stop:disabled { opacity: .6; }
 .btn-sm { padding: 5px 9px; font-size: 12px; }
@@ -90,7 +92,7 @@ body {
 .pill { font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
 .pill b { color: var(--text); }
 
-.runs { padding: 8px 20px 0; }
+.runs { padding: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .linklike { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 0; }
 .linklike:hover { color: var(--text); }
 #runs-panel { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
