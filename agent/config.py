@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,6 +31,39 @@ class SubmitMode(str, Enum):
 class LoginMode(str, Enum):
     persistent = "persistent"
     credentials = "credentials"
+
+
+class ScheduleWorkflow(str, Enum):
+    schedule_run = "schedule-run"  # discover + score + apply
+    find = "find"                  # discover + score only
+    apply = "apply"                # apply queued jobs only
+
+
+class ScheduleMode(str, Enum):
+    interval = "interval"  # every N hours (launchd StartInterval)
+    daily = "daily"        # once per day at time on selected weekdays
+
+
+ALLOWED_INTERVAL_HOURS = (1, 2, 4, 6, 12, 24)
+
+
+class ScheduleConfig(BaseModel):
+    enabled: bool = False
+    mode: ScheduleMode = ScheduleMode.interval
+    interval_hours: int = 24  # 1, 2, 4, 6, 12, or 24 when mode=interval
+    time: str = "09:00"  # local HH:MM when mode=daily
+    days: list[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    workflow: ScheduleWorkflow = ScheduleWorkflow.schedule_run
+    only_approved: bool = False
+    skip_generate: bool = True  # scheduled apply: master resume only, no LLM drafts
+
+    @field_validator("workflow", mode="before")
+    @classmethod
+    def _coerce_workflow(cls, value: Any) -> Any:
+        # Legacy configs used workflow: daily for the full pipeline command.
+        if value == "daily":
+            return ScheduleWorkflow.schedule_run.value
+        return value
 
 
 class SearchConfig(BaseModel):
@@ -109,6 +142,7 @@ class Settings(BaseModel):
 
     # Nested
     search: SearchConfig = Field(default_factory=SearchConfig)
+    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     blacklist_companies: list[str] = Field(default_factory=list)
     blacklist_title_keywords: list[str] = Field(default_factory=list)
 

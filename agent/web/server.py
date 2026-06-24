@@ -18,6 +18,15 @@ from agent.config import Settings, load_settings
 from agent.db import Database
 from agent.intake_refresh import merge_intake_from_resume
 from agent.models import Job, Status
+from agent.schedule import (
+    ScheduleError,
+    delete_active_schedule,
+    install_schedule,
+    merge_schedule_update,
+    save_schedule_config,
+    schedule_status,
+    uninstall_schedule,
+)
 from agent.web.runner import ActionRunner
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -50,6 +59,7 @@ def serialize_job(job: Job, settings: Settings) -> dict:
 
 ALLOWED_MASTER_SUFFIXES = {".docx", ".pdf", ".txt"}
 ALLOWED_JOB_RESUME_SUFFIXES = {".docx", ".pdf"}
+ALLOWED_COVER_SUFFIXES = {".docx", ".pdf", ".txt"}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
@@ -83,6 +93,31 @@ def save_job_resume(settings: Settings, job: Job, filename: str, content: bytes)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(content)
     return dest
+
+
+def save_job_cover(settings: Settings, job: Job, filename: str, content: bytes) -> Path:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in ALLOWED_COVER_SUFFIXES:
+        raise ValueError(f"unsupported type {suffix or '(none)'}; use .docx, .pdf, or .txt")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise ValueError("file too large (max 10 MB)")
+
+    if job.cover_letter_path and _under_output(settings, job.cover_letter_path):
+        dest = Path(job.cover_letter_path).with_suffix(suffix)
+    else:
+        from agent.resume.builder import job_basename
+        dest = settings.output_path / "cover_letters" / f"{job_basename(job.company, job.title)}{suffix}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(content)
+    return dest
+
+
+def ui_config(settings: Settings) -> dict:
+    return {
+        "submit_mode": settings.submit_mode.value,
+        "dry_run": settings.dry_run,
+        "match_threshold": settings.match_threshold,
+    }
 
 
 def master_resume_info(settings: Settings) -> dict:
@@ -199,6 +234,18 @@ class ApplyPayload(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
 
 
+class SchedulePayload(BaseModel):
+    enabled: bool | None = None
+    mode: str | None = None
+    interval_hours: int | None = None
+    time: str | None = None
+    days: list[str] | None = None
+    workflow: str | None = None
+    only_approved: bool | None = None
+    skip_generate: bool | None = None
+    install: bool = False
+
+
 # ---- app -------------------------------------------------------------------
 
 def create_app() -> FastAPI:
@@ -207,6 +254,10 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    @app.get("/api/config")
+    def get_config() -> dict:
+        return ui_config(_settings())
 
     @app.get("/api/jobs")
     def list_jobs() -> dict:
@@ -244,6 +295,67 @@ def create_app() -> FastAPI:
         settings = _settings()
         db = _db(settings)
         return {"runs": [r.as_row() for r in db.recent_runs(25)]}
+
+    @app.get("/api/schedule")
+    def get_schedule() -> dict:
+        settings = _settings()
+        return schedule_status(settings)
+
+    @app.put("/api/schedule")
+    def update_schedule(payload: SchedulePayload) -> dict:
+        settings = _settings()
+        try:
+            updated = merge_schedule_update(
+                settings.schedule,
+                enabled=payload.enabled,
+                mode=payload.mode,
+                interval_hours=payload.interval_hours,
+                time=payload.time,
+                days=payload.days,
+                workflow=payload.workflow,
+                only_approved=payload.only_approved,
+                skip_generate=payload.skip_generate,
+            )
+        except ScheduleError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        save_schedule_config(updated)
+        settings = load_settings()
+        settings.ensure_dirs()
+        status = schedule_status(settings)
+        if payload.install and updated.enabled:
+            result = install_schedule(settings)
+            status = schedule_status(load_settings())
+            status["install"] = {"ok": result.ok, "message": result.message}
+        return status
+
+    @app.post("/api/schedule/install")
+    def schedule_install_endpoint() -> dict:
+        settings = _settings()
+        if not settings.schedule.enabled:
+            raise HTTPException(400, "Enable the schedule before installing.")
+        result = install_schedule(settings)
+        if not result.ok:
+            raise HTTPException(400, result.message)
+        return {"ok": True, "message": result.message, **schedule_status(load_settings())}
+
+    @app.delete("/api/schedule/active")
+    def delete_active_schedule_endpoint() -> dict:
+        settings = _settings()
+        status = schedule_status(settings)
+        if not any(s.get("can_delete") for s in status.get("schedules", [])):
+            raise HTTPException(400, "No active or installed schedule to delete.")
+        result = delete_active_schedule(settings)
+        if not result.ok:
+            raise HTTPException(400, result.message)
+        return {"ok": True, "message": result.message, **schedule_status(load_settings())}
+
+    @app.post("/api/schedule/uninstall")
+    def schedule_uninstall_endpoint() -> dict:
+        settings = _settings()
+        result = uninstall_schedule(settings)
+        if not result.ok:
+            raise HTTPException(400, result.message)
+        return {"ok": True, "message": result.message, **schedule_status(load_settings())}
 
     @app.post("/api/jobs/approve")
     def approve(payload: ApprovePayload) -> dict:
@@ -312,6 +424,24 @@ def create_app() -> FastAPI:
         sheet.export(db, settings.sheet_file)
         return {"ok": True, "name": dest.name, "path": str(dest)}
 
+    @app.post("/api/jobs/{job_id}/cover/upload")
+    async def upload_job_cover(job_id: str, file: UploadFile = File(...)) -> dict:
+        settings = _settings()
+        db = _db(settings)
+        content = await file.read()
+        with db.session() as s:
+            job = db.get(s, job_id)
+            if job is None:
+                raise HTTPException(404, "job not found")
+            try:
+                dest = save_job_cover(settings, job, file.filename or "cover.docx", content)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        db.update(job_id, cover_letter_path=str(dest))
+        from agent import sheet
+        sheet.export(db, settings.sheet_file)
+        return {"ok": True, "name": dest.name, "path": str(dest)}
+
     @app.get("/api/jobs/{job_id}/resume")
     def resume(job_id: str):
         return _serve_doc(job_id, "resume")
@@ -329,6 +459,11 @@ def create_app() -> FastAPI:
         if not _under_output(settings, path):
             raise HTTPException(status_code=404, detail="document not available")
         return FileResponse(path, filename=Path(path).name)
+
+    @app.post("/api/actions/ack")
+    def action_ack() -> dict:
+        runner.ack()
+        return runner.snapshot()
 
     @app.get("/api/actions/status")
     def action_status() -> dict:
@@ -368,6 +503,20 @@ def create_app() -> FastAPI:
                 400,
                 "Select jobs in the grid or set only_approved to apply all approved jobs.",
             )
+        settings = _settings()
+        db = _db(settings)
+        if payload.job_ids and not payload.only_approved:
+            unapproved = []
+            with db.session() as s:
+                for jid in payload.job_ids:
+                    job = db.get(s, jid)
+                    if job and not job.approved:
+                        unapproved.append(jid)
+            if unapproved:
+                raise HTTPException(
+                    400,
+                    f"{len(unapproved)} selected job(s) are not approved. Approve them first or use Apply all approved.",
+                )
         if not runner.start(
             "apply",
             lambda: _run_apply(payload.only_approved, payload.job_ids or None),

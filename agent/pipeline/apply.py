@@ -34,6 +34,7 @@ def run_apply(
     only_approved: bool = False,
     job_ids: list[str] | None = None,
     regenerate: bool = False,
+    skip_generate: bool = False,
     should_stop: Optional[Callable[[], bool]] = None,
     progress: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -70,6 +71,8 @@ def run_apply(
 
     if progress:
         progress(f"Applying to {len(candidates)} job(s) — watch the Chrome window the tool opened")
+    if skip_generate and progress:
+        progress("Skipping draft generation — applying with master resume (or existing tailored files)")
     if settings.dry_run and progress:
         progress("DRY_RUN is on: forms fill but final submit is skipped")
 
@@ -92,7 +95,7 @@ def run_apply(
             label = f"{job.title} @ {job.company}".strip(" @")
             if progress:
                 progress(f"Opening job: {label}")
-            _process_one(session, settings, db, llm, job, regenerate, stats)
+            _process_one(session, settings, db, llm, job, regenerate, stats, skip_generate=skip_generate)
             if stats.pop("_just_submitted", False):
                 submitted += 1
     finally:
@@ -106,25 +109,32 @@ def run_apply(
     return stats
 
 
-def _process_one(session, settings, db, llm, job, regenerate, stats) -> None:
+def _process_one(session, settings, db, llm, job, regenerate, stats, *, skip_generate=False) -> None:
     """Generate (if needed), route, submit, and record outcome for one job."""
     # 1) Reuse already-generated docs (preserving manual edits); else draft now.
     resume_path = job.resume_path or ""
     has_docs = bool(resume_path) and Path(resume_path).exists()
-    if (not has_docs or regenerate) and llm is not None:
+    if skip_generate:
+        regenerate = False
+    elif (not has_docs or regenerate) and llm is not None:
         resume_path, cover_path = generate_documents(settings, llm, job)
         db.update(job.job_id, resume_path=resume_path, cover_letter_path=cover_path,
                   status=Status.generated.value)
         stats["generated"] += 1
 
+    use_master = job.use_master_resume or (skip_generate and not has_docs)
     upload = (
         master_resume_for_upload(settings)
-        if job.use_master_resume
+        if use_master
         else _resume_for_upload(settings, resume_path)
     )
-    if job.use_master_resume and upload is None:
-        _park_for_review(
-            db, job, "use_master_resume set but master resume file not found.", [])
+    if use_master and upload is None:
+        reason = (
+            "master resume file not found (scheduled apply skips draft generation)."
+            if skip_generate and not job.use_master_resume
+            else "use_master_resume set but master resume file not found."
+        )
+        _park_for_review(db, job, reason, [])
         stats["human_review"] += 1
         console.log(f"[yellow]Human review[/]: {job.title} @ {job.company} - "
                     "master resume missing")

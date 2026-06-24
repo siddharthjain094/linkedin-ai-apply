@@ -175,3 +175,20 @@ def test_review_mode_drafts_only(tmp_path, monkeypatch):
     stats = apply_mod.run_apply(session=None, settings=settings, db=db, llm=object())
     assert (calls["easy"], calls["external"]) == (0, 0)
     assert stats["human_review"] == 1
+
+
+def test_skip_generate_never_calls_generate_documents(tmp_path, monkeypatch):
+    db = _seed(tmp_path, "easy")
+    calls = _patch(monkeypatch, easy_ret=("applied", "ok", []))
+    gen_called = {"n": 0}
+
+    def counting_generate(*a, **k):
+        gen_called["n"] += 1
+        return "", ""
+
+    monkeypatch.setattr(apply_mod, "generate_documents", counting_generate)
+    stats = apply_mod.run_apply(
+        session=None, settings=Settings(), db=db, llm=object(), skip_generate=True)
+    assert gen_called["n"] == 0
+    assert stats["generated"] == 0
+    assert stats["applied"] == 1

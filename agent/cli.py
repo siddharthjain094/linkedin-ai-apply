@@ -265,9 +265,12 @@ def apply(
     regenerate: bool = typer.Option(
         False, "--regenerate",
         help="Re-draft documents even if they already exist (discards edits)."),
+    no_generate: bool = typer.Option(
+        False, "--no-generate",
+        help="Do not draft tailored documents; apply with master resume (or existing drafts)."),
 ):
     """Apply to queued jobs. Reuses already-generated (and possibly hand-edited)
-    documents; only drafts missing ones. Use --only-approved for the review flow."""
+    documents; only drafts missing ones unless --no-generate. Use --only-approved for the review flow."""
     from agent.browser.session import open_session
     from agent.pipeline import apply as apply_phase
     from agent import sheet
@@ -282,7 +285,8 @@ def apply(
                 raise typer.Exit(1)
             stats = apply_phase.run_apply(
                 session, settings, db, _llm(settings),
-                only_approved=only_approved, regenerate=regenerate)
+                only_approved=only_approved, regenerate=regenerate,
+                skip_generate=no_generate)
         sheet.export(db, settings.sheet_file)
         console.print(f"[bold]Apply summary:[/] {stats}")
     except RUN_ERRORS as exc:
@@ -400,16 +404,19 @@ def profile():
         console.print("  [dim](nothing extracted)[/]")
 
 
-@app.command()
-def daily(
+@app.command("schedule-run")
+def schedule_run(
     submit_mode: Optional[str] = typer.Option(None),
     dry_run: Optional[bool] = typer.Option(None),
     max_applies: Optional[int] = typer.Option(None),
     match_threshold: Optional[int] = typer.Option(None),
     headless: Optional[bool] = typer.Option(None),
     model: Optional[str] = typer.Option(None),
+    no_generate: bool = typer.Option(
+        False, "--no-generate",
+        help="Do not draft tailored documents during apply; use master resume instead."),
 ):
-    """Full daily run: find new jobs, then apply. Wire this to cron/launchd."""
+    """Full scheduled pipeline: find new jobs, score, then apply. Wire this to cron/launchd."""
     from agent.browser.session import open_session
     from agent.pipeline import apply as apply_phase, discover, match
     from agent import sheet
@@ -420,15 +427,20 @@ def daily(
     lock = _acquire_lock(settings)
     try:
         with open_session(settings) as session:
-            if not session.ensure_login(interactive=True):
-                console.print("[red]Not logged in. Run `linkedin-apply login` first.[/]")
+            if not session.ensure_login(interactive=False):
+                console.print(
+                    "[red]Not logged in. Run `linkedin-apply login` in a terminal first.[/]"
+                )
                 raise typer.Exit(1)
+            console.print("[bold]Schedule run:[/] discover…")
             discover.discover(session, settings, db)
+            console.print("[bold]Schedule run:[/] score…")
             match.score_jobs(settings, db, llm)
             sheet.export(db, settings.sheet_file)
-            stats = apply_phase.run_apply(session, settings, db, llm)
+            console.print("[bold]Schedule run:[/] apply…")
+            stats = apply_phase.run_apply(session, settings, db, llm, skip_generate=no_generate)
         sheet.export(db, settings.sheet_file)
-        console.print(f"[bold]Daily run complete:[/] {stats}")
+        console.print(f"[bold]Schedule run complete:[/] {stats}")
     except RUN_ERRORS as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1)
@@ -553,6 +565,158 @@ def _save_learned(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, sort_keys=True, allow_unicode=True)
+
+
+# ---- schedule --------------------------------------------------------------
+
+schedule_app = typer.Typer(help="Configure automated search/apply at a set time.")
+app.add_typer(schedule_app, name="schedule")
+
+
+@schedule_app.command("show")
+def schedule_show():
+    """Show the configured schedule and whether launchd has it installed."""
+    from agent.schedule import schedule_status
+
+    settings = load_settings()
+    settings.ensure_dirs()
+    status = schedule_status(settings)
+    console.print("[bold]Schedule configuration[/]")
+    console.print(f"  enabled:       {status['enabled']}")
+    console.print(f"  schedule:      {status['description']}")
+    console.print(f"  mode:          {status['mode']}")
+    if status["mode"] == "interval":
+        console.print(f"  interval:      every {status['interval_hours']}h")
+    else:
+        console.print(f"  time:          {status['time']} (local)")
+        console.print(f"  days:          {', '.join(status['days'])}")
+    console.print(f"  workflow:      {status['workflow']}")
+    console.print(f"  only_approved: {status['only_approved']}")
+    console.print(f"  skip_generate: {status['skip_generate']}")
+    schedules = status.get("schedules") or []
+    if schedules:
+        console.print(f"\n[bold]Saved schedule[/] (max {status.get('max_schedules', 1)} active)")
+        for s in schedules:
+            mark = "[green]RUNNING[/]" if s["status"] == "active" else s["status_label"]
+            console.print(f"  [{mark}] {s['description']} — {s['workflow_label']}")
+            if s.get("can_delete"):
+                console.print("    [dim]Delete: linkedin-apply schedule delete[/]")
+    console.print(f"  config:      {status['config_path']}")
+    console.print(f"  command:     {' '.join(status['command'])}")
+    console.print(f"  log:         {status['log_path']}")
+    if status["supports_install"]:
+        plat = status.get("install_platform") or "os"
+        state = "[green]active[/]" if status["loaded"] else (
+            "[yellow]installed but not active[/]" if status["installed"] else "[dim]not installed[/]")
+        console.print(f"  scheduler:   {state}  ({plat}: {status.get('task_name', '')})")
+        if status.get("agent_path"):
+            console.print(f"  agent:       {status['agent_path']}")
+    else:
+        console.print("\n[bold]Manual install (Linux/other):[/]")
+        console.print(f"  {status.get('manual_install') or status['cron_line']}")
+
+
+@schedule_app.command("set")
+def schedule_set(
+    enable: Optional[bool] = typer.Option(None, "--enable/--disable"),
+    mode: Optional[str] = typer.Option(
+        None, "--mode", help="interval (every N hours) | daily (once at time on weekdays)."),
+    interval_hours: Optional[int] = typer.Option(
+        None, "--interval", "-i", help="Run every N hours: 1, 2, 4, 6, 12, or 24."),
+    time: Optional[str] = typer.Option(None, "--time", "-t", help="Local time HH:MM (daily mode)."),
+    days: Optional[str] = typer.Option(
+        None, "--days", help="Comma-separated weekdays (daily mode): mon,tue,..."),
+    workflow: Optional[str] = typer.Option(
+        None, "--workflow", help="schedule-run (search+apply) | find | apply"),
+    only_approved: Optional[bool] = typer.Option(
+        None, "--only-approved/--all-generated",
+        help="For workflow=apply: only submit approved jobs."),
+    install: bool = typer.Option(
+        False, "--install", help="Install (or refresh) the launchd agent after saving."),
+):
+    """Save schedule settings to config.yaml."""
+    from agent.schedule import ScheduleError, install_schedule, merge_schedule_update, save_schedule_config
+
+    settings = load_settings()
+    try:
+        updates: dict = {
+            "enabled": enable,
+            "time": time,
+            "days": days,
+            "workflow": workflow,
+            "only_approved": only_approved,
+        }
+        if mode is not None:
+            updates["mode"] = mode
+        if interval_hours is not None:
+            updates["interval_hours"] = interval_hours
+            updates["mode"] = "interval"
+        updated = merge_schedule_update(settings.schedule, **updates)
+    except ScheduleError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+
+    path = save_schedule_config(updated)
+    console.print(f"[green]Saved schedule to[/] {path}")
+    from agent.schedule import schedule_description
+    console.print(f"  {schedule_description(updated)} — workflow={updated.workflow.value}"
+                  f"{' (enabled)' if updated.enabled else ' (disabled)'}")
+
+    if install:
+        settings = load_settings()
+        result = install_schedule(settings)
+        if result.ok:
+            console.print(f"[green]{result.message}[/]")
+        else:
+            console.print(f"[yellow]{result.message}[/]")
+            raise typer.Exit(1)
+
+
+@schedule_app.command("install")
+def schedule_install():
+    """Install the OS scheduler from the current config.yaml schedule (macOS/Windows)."""
+    from agent.schedule import install_schedule
+
+    settings = load_settings()
+    settings.ensure_dirs()
+    result = install_schedule(settings)
+    if result.ok:
+        console.print(f"[green]{result.message}[/]")
+    else:
+        console.print(f"[red]{result.message}[/]")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("delete")
+def schedule_delete():
+    """Remove the active OS schedule and disable it in config."""
+    from agent.schedule import delete_active_schedule, schedule_status
+
+    settings = load_settings()
+    status = schedule_status(settings)
+    if not any(s.get("can_delete") for s in status.get("schedules", [])):
+        console.print("[yellow]No active or installed schedule to delete.[/]")
+        raise typer.Exit(1)
+    result = delete_active_schedule(settings)
+    if result.ok:
+        console.print(f"[green]{result.message}[/]")
+    else:
+        console.print(f"[red]{result.message}[/]")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("uninstall")
+def schedule_uninstall():
+    """Remove the installed schedule (launchd agent or Windows task)."""
+    from agent.schedule import uninstall_schedule
+
+    settings = load_settings()
+    result = uninstall_schedule(settings)
+    if result.ok:
+        console.print(f"[green]{result.message}[/]")
+    else:
+        console.print(f"[red]{result.message}[/]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

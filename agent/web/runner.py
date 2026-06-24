@@ -76,6 +76,20 @@ class ActionRunner:
         with self._lock:
             self.progress = message or ""
 
+    def ack(self) -> bool:
+        """Clear completed action state after the UI has consumed it."""
+        with self._lock:
+            if self.running:
+                return False
+            if not self.action and not self.error and not self.result:
+                return True
+            self.action = None
+            self.error = None
+            self.result = None
+            self.finished_at = None
+            self.progress = ""
+            return True
+
     def snapshot(self) -> dict:
         with self._lock:
             progress = self.progress

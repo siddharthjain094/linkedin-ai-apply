@@ -94,6 +94,12 @@ class Database:
             )
             return {row[0] for row in s.execute(stmt).all()}
 
+    def scored_job_ids(self) -> set[str]:
+        """Jobs that already have an LLM match score (description backfill optional)."""
+        with self.session() as s:
+            stmt = select(Job.job_id).where(Job.match_score.is_not(None))
+            return {row[0] for row in s.execute(stmt).all()}
+
     def pending_for_apply(self, limit: int | None = None) -> list[Job]:
         """Jobs eligible to be acted on.
 

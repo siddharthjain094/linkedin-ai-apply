@@ -68,18 +68,36 @@ def discover(
         # Fetch descriptions for new search jobs AND for previously-known jobs whose
         # description fetch failed before (so a transient failure isn't permanent).
         # Hiring posts already carry their text, so they're never re-fetched here.
+        # Skip jobs that are already scored — apply opens the job page anyway, and
+        # re-fetching dozens of stale empty descriptions blocks scheduled runs for hours.
         missing_desc = db.job_ids_missing_description()
+        already_scored = db.scored_job_ids()
+        desc_fetches = 0
+        desc_cap = max(20, settings.search.max_jobs_per_search)
         for jid, job in collected.items():
             if _stop():
                 stopped = True
                 break
             if job.get("source") != "search" or job.get("description"):
                 continue
-            if jid not in known or jid in missing_desc:
-                _guard()
-                if progress:
-                    progress(f"Opening job page: {job.get('title', jid)}")
-                search.fetch_description(session, settings, job)
+            if jid not in known and jid not in missing_desc:
+                continue
+            if jid in already_scored:
+                continue
+            if desc_fetches >= desc_cap:
+                console.log(
+                    f"[yellow]Description fetch cap ({desc_cap}) reached; "
+                    "skipping remaining jobs this run.[/]"
+                )
+                break
+            _guard()
+            label = job.get("title") or jid
+            msg = f"Fetching description: {label}"
+            console.log(msg)
+            if progress:
+                progress(msg)
+            search.fetch_description(session, settings, job)
+            desc_fetches += 1
     finally:
         # Persist whatever we collected, even on an early stop or logout (partial).
         new_count, seen_count = db.upsert_discovered(collected.values())

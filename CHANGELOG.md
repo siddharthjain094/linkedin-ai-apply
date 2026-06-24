@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format is based on
 - Full **AGPL-3.0** `LICENSE`, contributor docs, security policy, and CI.
 
 ### Changed
+- Renamed CLI command `daily` → `schedule-run` (full discover + score + apply pipeline).
+  Legacy `workflow: daily` in config still loads correctly.
 - Document generation is decoupled from applying; edits made during review are what
   get submitted (PDF is rendered from the edited docx at submit time).
 - More resilient LinkedIn description fetching (expands the "…more" button) and

@@ -38,6 +38,8 @@ machine.
 - 🛟 **Robust by design** — single-instance run-lock, mid-run **logout detection**,
   a **Stop** button, loud LLM-failure alerts, and a **run history** so you always
   know what happened.
+- ⏰ **Runs on a schedule** — every 1–24 hours or once daily at a set time; configure
+  in the web UI or CLI and install on **macOS** (launchd) or **Windows** (Task Scheduler).
 
 > [!WARNING]
 > Automating LinkedIn login and applications violates LinkedIn's User Agreement and
@@ -72,7 +74,7 @@ linkedin-apply intake
 linkedin-apply login
 
 # 5. Go. Either let it run end-to-end:
-linkedin-apply daily
+linkedin-apply schedule-run
 #    ...or open the web UI to review & approve before anything is submitted:
 linkedin-apply ui      # http://127.0.0.1:8765
 ```
@@ -83,6 +85,7 @@ flow — nothing is submitted until you approve it.
 ## Table of contents
 
 - [Install](#install)
+- [Install on Windows](#install-on-windows)
 - [Configure](#configure)
 - [First login (once)](#first-login-once)
 - [Daily use](#daily-use)
@@ -97,15 +100,92 @@ flow — nothing is submitted until you approve it.
 
 ## Install
 
+Works on **macOS, Windows, and Linux**. Browser automation uses Playwright's bundled
+**Chromium** (installed below) — you do not need a separate Chrome install unless you
+opt into `USE_SYSTEM_CHROME`.
+
 The `pdf` extra enables PDF output; `ui` enables the local web UI; `dev` adds the
 test/lint tools. Pick the extras you want:
 
 ```bash
 cd linkedin-ai-apply
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # macOS/Linux
 pip install -e ".[pdf,ui]"     # add ,dev if you plan to run tests / contribute
 playwright install chromium
 ```
+
+### Install on Windows
+
+**1. Python 3.10+**
+
+Install from [python.org](https://www.python.org/downloads/windows/) or:
+
+```powershell
+winget install Python.Python.3.12
+```
+
+During setup, check **"Add python.exe to PATH"**.
+
+**2. Project + dependencies**
+
+Open **PowerShell** or **Command Prompt** in the project folder:
+
+```powershell
+cd linkedin-ai-apply
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -e ".[pdf,ui]"
+playwright install chromium
+```
+
+`playwright install chromium` downloads a Chromium build Playwright controls — this is
+what `linkedin-apply login` and `schedule-run` use by default. No separate Chrome install
+required.
+
+**3. Configure and run**
+
+```powershell
+copy .env.example .env
+notepad .env          # set LLM_API_KEY + LLM_MODEL
+notepad config.yaml   # job titles, locations, filters
+
+# drop resume at profile\master_resume.docx (.docx/.pdf/.txt), then:
+linkedin-apply intake
+linkedin-apply login  # log in once in the opened browser window
+linkedin-apply schedule-run    # or: linkedin-apply ui
+```
+
+**4. Schedule on Windows (optional)**
+
+```powershell
+# Every 4 hours, search + apply
+linkedin-apply schedule set --enable --interval 4 --install
+
+# Check status (Task Scheduler task name: LinkedIn-AI-Apply)
+linkedin-apply schedule show
+
+# Remove the scheduled task
+linkedin-apply schedule uninstall
+```
+
+Or use the web UI → **Schedule** → pick interval → **Install on Windows**.
+
+The installer creates `data\run_scheduled.cmd` and registers a Windows Task Scheduler
+job. Logs append to `data\daily.log`. Run `linkedin-apply login` once while logged
+into Windows so the saved browser session is available when the task fires.
+
+**Windows tips**
+
+- Keep `HEADLESS=false` in `.env` for scheduled runs (more reliable login reuse).
+- To reuse your installed Chrome instead of bundled Chromium, set in `.env`:
+  ```ini
+  USE_SYSTEM_CHROME=true
+  BROWSER_CHANNEL=chrome
+  CHROME_USER_DATA_DIR=%LOCALAPPDATA%\Google\Chrome\User Data
+  CHROME_PROFILE_DIRECTORY=Default
+  ```
+  Quit Chrome before the first run.
+- PDF output: `winget install TheDocumentFoundation.LibreOffice` (or upload `.docx`).
 
 ## Configure
 
@@ -198,7 +278,7 @@ open `chrome://version` and look at "Profile Path".
 ## Daily use
 
 ```bash
-linkedin-apply daily          # discover -> score -> generate -> apply (the cron target)
+linkedin-apply schedule-run          # discover -> score -> generate -> apply (scheduler target)
 
 # Or run the phases separately:
 linkedin-apply find           # discover + score + write spreadsheet only
@@ -255,15 +335,21 @@ The UI is a thin layer over the same pipeline:
   **Apply approved** submits only the jobs you signed off on.
 - A **Recent runs** panel shows the history of every find/generate/apply run
   (discovered, applied, review, errors) so you can see what happened at a glance.
+- A **Schedule** panel lets you pick **every 1h / 2h / 4h / 6h / 12h / 24h** (or once
+  daily at a time), choose the workflow, and **Install on Mac** to register launchd.
   If your LinkedIn session drops mid-run, the action stops with a clear message.
 
 It binds to localhost only and performs no interactive login, so run
 `linkedin-apply login` once in a terminal first.
 
+> **Note:** After pulling code changes, restart the UI server (`Ctrl+C` then
+> `linkedin-apply ui` again). An old process can serve stale static files or
+> return 500s on newer API routes.
+
 ### Useful flags (override .env/config.yaml per run)
 
 ```bash
-linkedin-apply daily --submit-mode review --dry-run        # draft everything, submit nothing
+linkedin-apply schedule-run --submit-mode review --dry-run        # draft everything, submit nothing
 linkedin-apply apply --submit-mode easy_only --max-applies 10
 linkedin-apply find --match-threshold 80 --model anthropic/claude-3-5-sonnet-latest
 ```
@@ -285,6 +371,19 @@ linkedin-apply find --match-threshold 80 --model anthropic/claude-3-5-sonnet-lat
 
 Search filters, blacklists, and per-person `match_threshold` live in `config.yaml`
 (or override via `search:` in `profile/intake.yaml`).
+
+Automated runs are configured under `schedule:` in `config.yaml`:
+
+| Key | Values | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` / `false` | Whether scheduling is turned on (install still required on macOS). |
+| `mode` | `interval` / `daily` | `interval`: every N hours. `daily`: once at `time` on `days`. |
+| `interval_hours` | `1`, `2`, `4`, `6`, `12`, `24` | Repeat interval when `mode: interval`. |
+| `time` | `HH:MM` | Local 24-hour time when `mode: daily`. |
+| `days` | `mon` … `sun` | Weekdays when `mode: daily`. |
+| `workflow` | `schedule-run` / `find` / `apply` | `schedule-run`: discover + score + apply. `find`: search only. `apply`: submit queued jobs. |
+| `only_approved` | `true` / `false` | For `workflow: apply`, submit only approved jobs (review-gated flow). |
+| `skip_generate` | `true` / `false` | **Default `true`:** scheduled apply uses your **master resume** only — no LLM-tailored drafts. Set `false` to draft during scheduled runs. |
 
 ## The spreadsheet (`data/jobs.xlsx`)
 
@@ -319,7 +418,7 @@ Answering via `review` does two things:
    map). On the next run these are merged into your screening answers, so the agent
    can answer the same question **for every future job**, not just this one.
 2. Sets `review_resolved` on the job, which makes it eligible again — the next
-   `apply`/`daily` run retries it. If it gets blocked by a *new* question, it goes
+   `apply`/`schedule-run` run retries it. If it gets blocked by a *new* question, it goes
    back to `human_review` (resolved flag cleared) and waits for you again.
 
 You can also resolve manually by editing `profile/learned_answers.yaml` directly
@@ -329,27 +428,97 @@ use the `review` command to change job state.)
 
 ## Schedule it daily
 
-macOS `launchd` or cron, e.g. cron at 9am:
+Run the pipeline unattended on a repeating interval or at a fixed daily time. Settings
+live in `config.yaml` under `schedule:` — or use the web UI → **Schedule**.
+
+**Prerequisites:** run `linkedin-apply login` once so the saved session works without
+you at the keyboard. Persistent login + non-headless (`HEADLESS=false`) is the most
+reliable for scheduled runs.
+
+### Web UI (easiest)
+
+1. `linkedin-apply ui`
+2. Click **Schedule** in the top-right bar
+3. Enable, pick **Every N hours** (1, 2, 4, 6, 12, or 24) or **Once daily at a time**
+4. Click **Save**, then **Install on Mac** or **Install on Windows**
+
+### macOS CLI: launchd
+
+```bash
+# View current schedule + whether launchd has it loaded
+linkedin-apply schedule show
+
+# Every 4 hours, full search + apply pipeline
+linkedin-apply schedule set --enable --interval 4 --install
+
+# Or: weekdays at 9:00 (daily mode)
+linkedin-apply schedule set --enable --mode daily --time 09:00 --days mon,tue,wed,thu,fri --install
+
+# Register / refresh launchd without changing config
+linkedin-apply schedule install
+
+# Remove the launchd agent
+linkedin-apply schedule uninstall
+```
+
+### Windows CLI: Task Scheduler
+
+Same commands as macOS — the tool detects Windows and registers **LinkedIn-AI-Apply**
+in Task Scheduler instead of launchd:
+
+```powershell
+linkedin-apply schedule set --enable --interval 6 --install
+linkedin-apply schedule show
+linkedin-apply schedule uninstall
+```
+
+**Workflows** (set with `--workflow` or in config):
+
+| Workflow | Command equivalent | Use when |
+| --- | --- | --- |
+| `schedule-run` (default) | `linkedin-apply schedule-run` | Fully automated search + apply |
+| `find` | `linkedin-apply find` | Discover/score only; apply manually or from UI |
+| `apply` | `linkedin-apply apply` | Submit queued jobs (`--only-approved` for review flow) |
+
+Example — review-gated automation: cron the search, approve in the UI, cron apply:
+
+```bash
+linkedin-apply schedule set --enable --time 08:00 --workflow find --install
+# …approve jobs in the UI during the day…
+linkedin-apply schedule set --time 18:00 --workflow apply --only-approved
+linkedin-apply schedule install   # refresh launchd with the new time/workflow
+```
+
+The same run-lock used by the CLI and UI prevents overlapping runs if a previous
+scheduled job is still going. For hourly intervals, keep `MAX_APPLIES_PER_RUN` conservative
+so each run can finish before the next one starts.
+
+### Linux / manual cron
+
+Auto-install is macOS-only. On other platforms, `linkedin-apply schedule show` prints
+a ready-made cron line, e.g.:
 
 ```cron
-0 9 * * *  cd /path/to/linkedin-ai-apply && /path/to/.venv/bin/linkedin-apply daily >> data/daily.log 2>&1
+0 9 * * 1-5  cd /path/to/linkedin-ai-apply && /path/to/.venv/bin/linkedin-apply schedule-run >> data/daily.log 2>&1
 ```
 
 (Persistent login + a non-headless run works best; for headless, make sure the saved
-session is still valid.)
+session is still valid. Re-run `linkedin-apply login` if scheduled runs start failing
+with "Not logged in".)
 
 ## Distribute it to other people
 
 Everything personal lives in two files: `profile/intake.yaml` and `profile/master_resume.docx`
 (plus their own `.env` with their LLM key). Hand someone the repo, have them run
 `linkedin-apply intake`, drop in their resume, `linkedin-apply login`, then
-`linkedin-apply daily`.
+`linkedin-apply schedule-run`.
 
 ## Project layout
 
 ```
 agent/
   config.py            # layered config (config.yaml + intake.yaml + .env + CLI)
+  schedule.py          # schedule config + macOS launchd / Windows Task Scheduler
   db.py / models.py    # SQLite state + status lifecycle + dedup + run history
   sheet.py             # DB -> xlsx/csv
   llm/                 # pluggable provider (litellm) + prompts
