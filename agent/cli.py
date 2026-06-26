@@ -382,6 +382,52 @@ def approve(
     console.print(f"[green]{verb} {done} job(s).[/]")
 
 
+@app.command("resume-check")
+def resume_check():
+    """Verify the master resume can be read — especially PDF text on Windows."""
+    from agent.resume.parser import (
+        MIN_RESUME_CHARS,
+        clear_resume_cache,
+        extract_text,
+        resume_text_looks_valid,
+    )
+
+    settings = load_settings()
+    path = settings.resolve_master_resume()
+    console.print(f"[bold]Master resume path:[/] {path}")
+    if not path.exists():
+        console.print("[red]File not found.[/] Upload via the UI or set master_resume_path.")
+        raise typer.Exit(1)
+
+    clear_resume_cache()
+    try:
+        text = extract_text(path)
+    except Exception as exc:
+        console.print(f"[red]Could not read resume:[/] {exc}")
+        raise typer.Exit(1) from exc
+
+    n = len(text.strip())
+    console.print(f"[bold]Extracted text:[/] {n} characters")
+    if resume_text_looks_valid(text):
+        console.print(f"[green]OK[/] — at least {MIN_RESUME_CHARS} characters (scoring/tailoring should work).")
+    else:
+        console.print(
+            f"[red]Too little text[/] — need at least {MIN_RESUME_CHARS} characters. "
+            "If this is a PDF, it may be image-only (scanned). "
+            "Re-save as a text PDF, upload a .docx, or paste into a .txt file."
+        )
+    preview = text.strip()[:400]
+    if preview:
+        console.print("\n[dim]Preview (first ~400 chars):[/]")
+        console.print(preview)
+    elif path.suffix.lower() == ".pdf":
+        console.print(
+            "\n[yellow]PDF returned no text.[/] On Windows this often means the PDF "
+            "has no selectable text layer. Export from Word/Google Docs as .docx instead."
+        )
+    raise typer.Exit(0 if resume_text_looks_valid(text) else 1)
+
+
 @app.command()
 def profile():
     """Show the parsed intake profile and what the resume parser can extract.

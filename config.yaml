@@ -1,6 +1,8 @@
 submit_mode: auto
 dry_run: false
 match_threshold: 70
+auto_approve_on_score: true
+skip_score_check: true
 max_applies_per_run: 20
 min_delay_ms: 1200
 max_delay_ms: 4200

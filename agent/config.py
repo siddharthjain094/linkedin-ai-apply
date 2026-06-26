@@ -85,7 +85,9 @@ class Settings(BaseModel):
     dry_run: bool = False
 
     # Matching / volume
-    match_threshold: int = 70
+    match_threshold: int = 70  # auto-approve jobs scored at or above this (informational scoring)
+    skip_score_check: bool = True  # legacy; apply/generate no longer gate on score
+    auto_approve_on_score: bool = True  # set approved=True when match_score >= match_threshold
     max_applies_per_run: int = 20
     min_delay_ms: int = 1200
     max_delay_ms: int = 4200
@@ -234,6 +236,8 @@ _ENV_KEYS = {
     "submit_mode": ("SUBMIT_MODE", str),
     "dry_run": ("DRY_RUN", "bool"),
     "match_threshold": ("MATCH_THRESHOLD", int),
+    "skip_score_check": ("SKIP_SCORE_CHECK", "bool"),
+    "auto_approve_on_score": ("AUTO_APPROVE_ON_SCORE", "bool"),
     "max_applies_per_run": ("MAX_APPLIES_PER_RUN", int),
     "min_delay_ms": ("MIN_DELAY_MS", int),
     "max_delay_ms": ("MAX_DELAY_MS", int),

@@ -117,6 +117,8 @@ def ui_config(settings: Settings) -> dict:
         "submit_mode": settings.submit_mode.value,
         "dry_run": settings.dry_run,
         "match_threshold": settings.match_threshold,
+        "skip_score_check": settings.skip_score_check,
+        "auto_approve_on_score": settings.auto_approve_on_score,
     }
 
 

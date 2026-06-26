@@ -192,3 +192,37 @@ def test_skip_generate_never_calls_generate_documents(tmp_path, monkeypatch):
     assert gen_called["n"] == 0
     assert stats["generated"] == 0
     assert stats["applied"] == 1
+
+
+def test_selected_job_bypasses_score_threshold(tmp_path, monkeypatch):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([{
+        "job_id": "1", "title": "Eng", "company": "Acme", "location": "Remote",
+        "url": "https://www.linkedin.com/jobs/view/1/", "description": "d",
+        "source": "search", "apply_type": "easy",
+    }])
+    _patch(monkeypatch, easy_ret=("applied", "ok", []))
+    stats = apply_mod.run_apply(
+        session=None,
+        settings=Settings(match_threshold=70),
+        db=db,
+        llm=object(),
+        job_ids=["1"],
+    )
+    assert stats["applied"] == 1
+
+
+def test_unscored_job_can_apply_bulk(tmp_path, monkeypatch):
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([{
+        "job_id": "1", "title": "Eng", "company": "Acme", "location": "Remote",
+        "url": "https://www.linkedin.com/jobs/view/1/", "description": "d",
+        "source": "search", "apply_type": "easy",
+    }])
+    db.set_approved("1", True)
+    _patch(monkeypatch, easy_ret=("applied", "ok", []))
+    stats = apply_mod.run_apply(
+        session=None, settings=Settings(match_threshold=70), db=db, llm=object(),
+        only_approved=True,
+    )
+    assert stats["applied"] == 1

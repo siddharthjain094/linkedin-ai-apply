@@ -48,10 +48,7 @@ def run_apply(
         if retried and progress:
             progress(f"Retrying {retried} approved job(s) from human review")
 
-    candidates = [
-        j for j in db.pending_for_apply()
-        if (j.match_score or 0) >= settings.match_threshold
-    ]
+    candidates = list(db.pending_for_apply())
     if selected:
         wanted = set(selected)
         candidates = [j for j in candidates if j.job_id in wanted]
@@ -238,11 +235,10 @@ def _explain_no_candidates(
     if job_ids:
         return (
             f"None of the {len(job_ids)} selected job(s) are eligible "
-            f"(already applied/skipped/closed, below score {settings.match_threshold}, "
-            "or still blocked in human review)."
+            "(already applied/skipped/closed, or still blocked in human review)."
         )
     if not only_approved:
-        return "No jobs matched apply filters (score threshold or status)."
+        return "No jobs matched apply filters (status)."
     with db.session() as s:
         approved = list(
             s.execute(select(Job).where(Job.approved.is_(True))).scalars().all()
@@ -251,8 +247,4 @@ def _explain_no_candidates(
     active = [j for j in approved if j.status not in terminal]
     if not active:
         return "No approved jobs to apply to — approve jobs in the grid first."
-    if all((j.match_score or 0) < settings.match_threshold for j in active):
-        return (
-            f"All approved jobs score below MATCH_THRESHOLD ({settings.match_threshold})."
-        )
     return "No eligible approved jobs right now (check status filters)."

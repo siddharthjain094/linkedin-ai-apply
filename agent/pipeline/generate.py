@@ -144,10 +144,7 @@ def generate_all(
     the browser or submit anything. Already-generated jobs are skipped (so a
     user's hand-edits are never clobbered) unless ``regenerate`` is set.
     """
-    candidates = [
-        j for j in db.pending_for_apply()
-        if (j.match_score or 0) >= settings.match_threshold
-    ]
+    candidates = list(db.pending_for_apply())
     made = skipped = failed = 0
     stopped = False
     for job in candidates:

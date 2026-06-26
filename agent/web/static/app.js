@@ -119,7 +119,9 @@ function renderConfigBadges() {
     `<span class="config-badge" title="SUBMIT_MODE from config">${esc(c.submit_mode)}</span>`,
   ];
   if (c.dry_run) parts.push('<span class="config-badge warn" title="DRY_RUN is on">DRY RUN</span>');
-  parts.push(`<span class="config-badge" title="MATCH_THRESHOLD for apply eligibility">match ≥${c.match_threshold}</span>`);
+  if (c.auto_approve_on_score) {
+    parts.push(`<span class="config-badge" title="Jobs scored at or above this are auto-approved">auto-approve ≥${c.match_threshold}</span>`);
+  }
   el.innerHTML = parts.join("");
 }
 

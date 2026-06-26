@@ -57,7 +57,11 @@ class BoomLLM:
 
 def test_score_jobs_aborts_after_repeated_llm_failures(tmp_path):
     resume = tmp_path / "resume.txt"
-    resume.write_text("Jane Engineer - 6 years building backends.")
+    resume.write_text(
+        "Jane Engineer - 6 years building backends with Python, Go, Postgres, "
+        "and AWS at high-traffic companies.\n" * 2,
+        encoding="utf-8",
+    )
     settings = Settings(master_resume_path=str(resume), match_threshold=70)
     db = Database(tmp_path / "s.db")
     db.upsert_discovered([_job("1"), _job("2"), _job("3"), _job("4")])
