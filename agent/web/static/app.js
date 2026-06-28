@@ -19,6 +19,10 @@ const state = {
   scheduleSummary: null,
   renderTimer: null,
   flashApproved: false,
+  stats: null,
+  statusFilter: "",
+  approvedOnly: false,
+  generateDialogArmed: false,
 };
 
 const STATUS_LABELS = {
@@ -167,20 +171,55 @@ function updateMasterHint() {
   }
 }
 
-async function loadStats() {
-  const el = $("stats");
-  try {
-    const s = await api("/api/stats");
-    const parts = Object.entries(s.by_status)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => `<span class="pill">${statusLabel(k)} <b>${v}</b></span>`);
-    parts.push(`<span class="pill">approved <b>${s.approved}</b></span>`);
-    parts.push(`<span class="pill">total <b>${state.jobs.length}</b></span>`);
-    parts.push('<span class="pill dim" title="Green ≥75, yellow ≥50, gray below">score legend</span>');
-    el.innerHTML = parts.join("");
-  } catch (e) {
-    el.innerHTML = '<span class="pill dim">Stats unavailable</span>';
+function statPillHtml(kind, label, count, active) {
+  const cls = active ? "pill active" : "pill";
+  return `<button type="button" class="${cls}" data-stat-filter="${esc(kind)}"` +
+    ` aria-pressed="${active ? "true" : "false"}">${esc(label)} <b>${count}</b></button>`;
+}
+
+function renderStatsBar() {
+  const el = $("stats-pills");
+  if (!el) return;
+  const s = state.stats;
+  if (!s) {
+    el.innerHTML = '<span class="pill dim">Loading stats&hellip;</span>';
+    return;
   }
+  const parts = Object.entries(s.by_status)
+    .sort((a, b) => b[1] - a[1])
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => statPillHtml(k, statusLabel(k), v, state.statusFilter === k));
+  parts.push(statPillHtml("approved", "Approved", s.approved, state.approvedOnly));
+  parts.push(statPillHtml("", "All jobs", state.jobs.length, !state.statusFilter && !state.approvedOnly));
+  parts.push('<span class="pill dim" title="Green ≥75, yellow ≥50, gray below">score legend</span>');
+  el.innerHTML = parts.join("");
+}
+
+async function loadStats() {
+  try {
+    state.stats = await api("/api/stats");
+    renderStatsBar();
+    updateApplyButton();
+  } catch (e) {
+    state.stats = null;
+    const pills = $("stats-pills");
+    if (pills) pills.innerHTML = '<span class="pill dim">Stats unavailable</span>';
+  }
+}
+
+function applyStatusFilter(kind) {
+  if (kind === "approved") {
+    state.approvedOnly = !state.approvedOnly;
+    if (state.approvedOnly) state.statusFilter = "";
+  } else if (kind === "") {
+    state.statusFilter = "";
+    state.approvedOnly = false;
+  } else {
+    state.statusFilter = state.statusFilter === kind ? "" : kind;
+    state.approvedOnly = false;
+  }
+  renderStatsBar();
+  render();
 }
 
 async function loadRuns() {
@@ -641,7 +680,7 @@ async function loadIntake() {
 }
 
 function setPipelineActive(stepId) {
-  document.querySelectorAll(".pipeline-step").forEach((el) => {
+  document.querySelectorAll(".workflow-btn").forEach((el) => {
     const on = stepId && el.id === stepId;
     el.classList.toggle("active", on);
     el.classList.remove("running");
@@ -651,21 +690,29 @@ function setPipelineActive(stepId) {
 function setPipelineRunning(action) {
   const map = { find: "btn-find", generate: "btn-generate", apply: "btn-apply" };
   const runningId = map[action];
-  document.querySelectorAll(".pipeline-step").forEach((el) => {
+  document.querySelectorAll(".workflow-btn").forEach((el) => {
     el.classList.remove("running");
     if (runningId && el.id === runningId) el.classList.add("running");
   });
 }
 
-function updateApplyButtonStyle() {
+function updateApplyButton() {
   const btn = $("btn-apply");
   if (!btn) return;
   const visible = visibleSelectedIds();
-  const approvedCount = visible.filter((id) => {
+  const selectedApproved = visible.filter((id) => {
     const j = state.jobs.find((x) => x.job_id === id);
     return j && j.approved;
   }).length;
-  btn.classList.toggle("pipeline-step-ready", approvedCount > 0 && !state.busy);
+  const queue = state.stats?.approved || 0;
+
+  let label = "Apply selected";
+  if (selectedApproved > 0) label = `Apply selected (${selectedApproved})`;
+  btn.textContent = label;
+  btn.title = queue
+    ? `${queue} approved in queue — select rows in the grid, then apply.`
+    : "Select approved jobs in the grid first.";
+  btn.classList.toggle("workflow-ready", selectedApproved > 0 && !state.busy);
 }
 
 function toggleIntakePanel(forceOpen) {
@@ -682,15 +729,14 @@ function toggleIntakePanel(forceOpen) {
 
 function filtered() {
   const q = $("f-search").value.trim().toLowerCase();
-  const status = $("f-status").value;
+  const status = state.statusFilter;
   const minScore = Number($("f-score").value) || 0;
-  const approvedOnly = $("f-approved").checked;
   const hasResume = $("f-hasresume").checked;
 
   let rows = state.jobs.filter((j) => {
     if (status && j.status !== status) return false;
     if ((j.match_score || 0) < minScore) return false;
-    if (approvedOnly && !j.approved) return false;
+    if (state.approvedOnly && !j.approved) return false;
     if (hasResume && !j.resume_exists) return false;
     if (q) {
       const hay = `${j.title} ${j.company} ${j.location}`.toLowerCase();
@@ -809,12 +855,21 @@ function renderEmptyStates(rows) {
       <span class="step">1.</span> Upload master resume (Profile &amp; resume)<br/>
       <span class="step">2.</span> Fetch jobs<br/>
       <span class="step">3.</span> Review &amp; approve drafts<br/>
-      <span class="step">4.</span> Apply approved`;
+      <span class="step">4.</span> Select approved rows and apply`;
     return;
   }
   if (rows.length === 0) {
     empty.hidden = false;
-    empty.textContent = "No jobs match the current filters. Try relaxing search, status, or score filters.";
+    const filterBits = [];
+    if (state.statusFilter) filterBits.push(statusLabel(state.statusFilter));
+    if (state.approvedOnly) filterBits.push("approved only");
+    if ($("f-hasresume")?.checked) filterBits.push("has resume");
+    if ($("f-search")?.value.trim()) filterBits.push("search");
+    if (Number($("f-score")?.value) > 0) filterBits.push("min score");
+    const hint = filterBits.length
+      ? `Active filters: ${filterBits.join(", ")}.`
+      : "Try relaxing search or score filters.";
+    empty.textContent = `No jobs match the current filters. ${hint}`;
   }
 }
 
@@ -855,7 +910,7 @@ function render() {
     }, 2500);
   }
 
-  updateApplyButtonStyle();
+  updateApplyButton();
   updateMutationButtons();
 
   if (hadFocus && searchEl) {
@@ -993,13 +1048,37 @@ async function triggerFind() {
   await trigger("find");
 }
 
+function generateDialogOpen() {
+  const dialog = $("generate-dialog");
+  if (!dialog || state.busy) return;
+  const regen = $("gen-regen");
+  if (regen) regen.checked = false;
+  dialog.hidden = false;
+  dialog.classList.add("is-open");
+  dialog.setAttribute("aria-hidden", "false");
+  state.generateDialogArmed = false;
+  requestAnimationFrame(() => { state.generateDialogArmed = true; });
+  $("btn-gen-confirm")?.focus();
+}
+
+function generateDialogClose() {
+  const dialog = $("generate-dialog");
+  if (!dialog) return;
+  dialog.classList.remove("is-open");
+  dialog.hidden = true;
+  dialog.setAttribute("aria-hidden", "true");
+  state.generateDialogArmed = false;
+  $("btn-generate")?.focus();
+}
+
 async function triggerGenerate() {
-  const regen = $("gen-regen")?.checked;
-  const msg = regen
-    ? "Regenerate drafts for all eligible jobs? This overwrites existing tailored documents."
-    : "Generate tailored drafts? This uses your LLM and may take a while.";
-  if (!confirm(msg)) return;
-  await trigger("generate", { regenerate: !!regen });
+  generateDialogOpen();
+}
+
+async function confirmGenerate() {
+  const regen = !!$("gen-regen")?.checked;
+  generateDialogClose();
+  await trigger("generate", { regenerate: regen });
 }
 
 async function trigger(name, body) {
@@ -1118,15 +1197,24 @@ async function pollStatus() {
     el.textContent = "Ready";
     el.title = "";
   }
-  updateApplyButtonStyle();
+  updateApplyButton();
 }
 
 // ---- wiring --------------------------------------------------------------
 
 function wire() {
   $("f-search").addEventListener("input", debouncedRender);
-  ["f-status", "f-score", "f-approved", "f-hasresume"].forEach((id) =>
-    $(id).addEventListener("input", render));
+  ["f-score", "f-hasresume"].forEach((id) =>
+    $(id).addEventListener("input", () => {
+      renderStatsBar();
+      render();
+    }));
+
+  $("stats-pills")?.addEventListener("click", (e) => {
+    const pill = e.target.closest("[data-stat-filter]");
+    if (!pill) return;
+    applyStatusFilter(pill.dataset.statFilter);
+  });
 
   document.querySelectorAll("th.sortable").forEach((th) =>
     th.addEventListener("click", () => {
@@ -1194,7 +1282,14 @@ function wire() {
   $("btn-resume-tailored").addEventListener("click", () => setResumeSource(false));
   $("btn-resume-mine").addEventListener("click", () => setResumeSource(true));
   $("btn-find").addEventListener("click", () => triggerFind().catch((e) => toast(e.message, true)));
-  $("btn-generate").addEventListener("click", () => triggerGenerate().catch((e) => toast(e.message, true)));
+  $("btn-generate").addEventListener("click", () => triggerGenerate());
+  $("btn-gen-cancel")?.addEventListener("click", generateDialogClose);
+  $("btn-gen-confirm")?.addEventListener("click", () =>
+    confirmGenerate().catch((e) => toast(e.message, true)));
+  $("generate-dialog-backdrop")?.addEventListener("click", (e) => {
+    if (!state.generateDialogArmed) return;
+    if (e.target.id === "generate-dialog-backdrop") generateDialogClose();
+  });
   $("btn-apply").addEventListener("click", () => applySelected().catch((e) => toast(e.message, true)));
   $("btn-stop").addEventListener("click", stopAction);
   $("btn-reset").addEventListener("click", () =>
@@ -1218,7 +1313,8 @@ function wire() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if ($("schedule-modal")?.classList.contains("is-open")) scheduleModalClose();
+      if ($("generate-dialog")?.classList.contains("is-open")) generateDialogClose();
+      else if ($("schedule-modal")?.classList.contains("is-open")) scheduleModalClose();
       else if ($("runs-modal")?.classList.contains("is-open")) runsModalClose();
     }
   });
@@ -1249,16 +1345,11 @@ function wire() {
     replaceJobCover(jobId, file).catch((err) => toast(err.message, true));
   });
 
-  // Regenerate checkbox injected next to generate button
-  const genWrap = document.createElement("label");
-  genWrap.className = "chk gen-regen-wrap";
-  genWrap.title = "Overwrite existing tailored documents";
-  genWrap.innerHTML = '<input id="gen-regen" type="checkbox" /> Regenerate';
-  $("btn-generate")?.after(genWrap);
 }
 
 wire();
 toggleIntakePanel(false);
+renderStatsBar();
 loadConfig();
 loadScheduleChip();
 const gridLoading = $("grid-loading");

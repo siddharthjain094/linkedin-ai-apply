@@ -4,67 +4,62 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>linkedin-ai-apply</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=12" />
 </head>
 <body>
-  <div class="site-header" id="site-header">
-  <header class="topbar">
-    <div class="brand">
-      <span class="dot"></span>
-      <h1>linkedin&#8209;ai&#8209;apply</h1>
-    </div>
-    <div class="pipeline" role="group" aria-label="Pipeline actions">
-      <button id="btn-intake" type="button" class="pipeline-step" aria-expanded="false">
-        <span class="pipeline-num">1</span>
-        Profile &amp; resume
-      </button>
-      <span class="pipeline-arrow" aria-hidden="true"></span>
-      <button id="btn-find" type="button" class="pipeline-step">
-        <span class="pipeline-num">2</span>
-        Fetch jobs
-      </button>
-      <span class="pipeline-arrow" aria-hidden="true"></span>
-      <button id="btn-generate" type="button" class="pipeline-step">
-        <span class="pipeline-num">3</span>
-        Generate drafts
-        <span class="pipeline-optional">optional</span>
-      </button>
-      <span class="pipeline-arrow" aria-hidden="true"></span>
-      <button id="btn-apply" type="button" class="pipeline-step pipeline-step-final">
-        <span class="pipeline-num">4</span>
-        Apply approved
-      </button>
-    </div>
-    <div class="topbar-right">
-      <div id="config-badges" class="config-badges" aria-label="Run settings"></div>
-      <span id="schedule-chip" class="schedule-chip" hidden></span>
-      <button id="btn-schedule" type="button" class="btn btn-sm btn-schedule">Schedule</button>
-      <div class="stop-slot">
-        <button id="btn-stop" class="btn btn-stop" type="button" hidden>Stop</button>
+  <header class="site-header" id="site-header">
+    <div class="header-bar">
+      <div class="app-brand">
+        <span class="app-mark" aria-hidden="true"></span>
+        <span class="app-name">linkedin&#8209;ai&#8209;apply</span>
       </div>
-      <div id="run-status" class="run-status idle">Ready</div>
+      <div class="header-utilities">
+        <div id="config-badges" class="config-badges" aria-label="Run settings"></div>
+        <span id="schedule-chip" class="schedule-chip" hidden></span>
+        <button id="btn-runs" type="button" class="btn btn-sm btn-ghost">Recent runs</button>
+        <button id="btn-schedule" type="button" class="btn btn-sm btn-ghost">Schedule</button>
+        <div class="stop-slot">
+          <button id="btn-stop" class="btn btn-sm btn-stop" type="button" hidden>Stop</button>
+        </div>
+        <div id="run-status" class="run-status idle">Ready</div>
+      </div>
+    </div>
+
+    <div class="header-toolbar" role="navigation" aria-label="Application controls">
+      <div class="toolbar-group">
+        <span class="toolbar-label">Workflow</span>
+        <div class="workflow-actions" role="group" aria-label="Pipeline actions">
+          <button id="btn-intake" type="button" class="btn btn-sm workflow-btn" aria-expanded="false">
+            Profile &amp; resume
+          </button>
+          <button id="btn-find" type="button" class="btn btn-sm workflow-btn">
+            Fetch jobs
+          </button>
+          <button id="btn-generate" type="button" class="btn btn-sm workflow-btn">
+            Generate drafts
+          </button>
+          <button id="btn-apply" type="button" class="btn btn-sm btn-primary workflow-primary"
+            title="Select approved jobs in the grid first.">
+            Apply selected
+          </button>
+        </div>
+      </div>
+
+      <div class="toolbar-sep" aria-hidden="true"></div>
+
+      <div class="toolbar-group toolbar-group-fill">
+        <span class="toolbar-label">Jobs</span>
+        <div class="jobs-filters">
+          <input id="f-search" type="search" placeholder="Search title or company&hellip;" aria-label="Search jobs" />
+          <label class="filter-field minscore" title="Display filter only; apply eligibility uses MATCH_THRESHOLD from config">
+            <span class="filter-label">Min score</span>
+            <input id="f-score" type="number" min="0" max="100" step="5" value="0" />
+          </label>
+          <label class="filter-field chk"><input id="f-hasresume" type="checkbox" /> Has resume</label>
+        </div>
+      </div>
     </div>
   </header>
-
-  <section class="filters" aria-label="Job filters">
-    <input id="f-search" type="search" placeholder="Search title or company&hellip;" />
-    <select id="f-status">
-      <option value="">All statuses</option>
-      <option value="new">New</option>
-      <option value="generated">Draft ready</option>
-      <option value="applied">Applied</option>
-      <option value="human_review">Needs review</option>
-      <option value="skipped">Skipped</option>
-      <option value="error">Error</option>
-    </select>
-    <label class="minscore" title="Display filter only; apply eligibility uses MATCH_THRESHOLD from config">
-      Min score
-      <input id="f-score" type="number" min="0" max="100" step="5" value="0" />
-    </label>
-    <label class="chk"><input id="f-approved" type="checkbox" /> Approved only</label>
-    <label class="chk"><input id="f-hasresume" type="checkbox" /> Has resume</label>
-  </section>
-  </div>
 
   <div class="app-scroll">
   <section id="intake-panel" class="pipeline-panel" hidden>
@@ -75,10 +70,6 @@
       <button id="btn-replace-master" class="btn btn-sm" type="button" title="Upload profile/master_resume and refresh intake.yaml">Replace master&hellip;</button>
     </section>
     <div id="intake-content" class="intake-content"></div>
-  </section>
-
-  <section class="subbar">
-    <button id="btn-runs" class="linklike" type="button">Recent runs&hellip;</button>
   </section>
 
   <input id="upload-master" type="file" accept=".docx,.pdf,.txt" hidden />
@@ -92,48 +83,64 @@
     <span class="bulk-label">Set resume for selected:</span>
     <button id="btn-resume-tailored" class="btn btn-sm" title="Use each job's tailored resume when applying">Tailored draft</button>
     <button id="btn-resume-mine" class="btn btn-sm" title="Use your master resume when applying">My master</button>
-    <button id="btn-approve" class="btn btn-ok">Approve selected</button>
-    <button id="btn-reject" class="btn btn-warn" title="Clears approval — does not skip or dismiss the job">Clear approval</button>
+    <button id="btn-approve" class="btn btn-sm btn-ok">Approve selected</button>
+    <button id="btn-reject" class="btn btn-sm btn-warn" title="Clears approval — does not skip or dismiss the job">Clear approval</button>
   </div>
 
-  <section class="stats" id="stats" aria-label="Job statistics">
-    <span class="pill dim">Loading stats&hellip;</span>
-  </section>
+  <main class="main-content">
+    <section class="stats-bar" id="stats" aria-label="Job statistics">
+      <span class="stats-label">Filter</span>
+      <div id="stats-pills" class="stats-pills"></div>
+    </section>
 
-  <main>
-    <div class="table-wrap">
-    <div id="grid-loading" class="grid-loading" hidden>
-      <div class="spinner"></div>
-      <span>Loading jobs&hellip;</span>
+    <div class="table-card">
+      <div class="table-wrap">
+        <div id="grid-loading" class="grid-loading" hidden>
+          <div class="spinner"></div>
+          <span>Loading jobs&hellip;</span>
+        </div>
+        <table id="grid">
+          <thead>
+            <tr>
+              <th class="c-check"><input id="check-all" type="checkbox" aria-label="Select all visible jobs" /></th>
+              <th class="c-title sortable" data-sort="title" data-label="Title">Title</th>
+              <th class="sortable" data-sort="company" data-label="Company">Company</th>
+              <th>Location</th>
+              <th class="sortable" data-sort="match_score" data-label="Score" title="Score colors: green ≥75, yellow ≥50, gray below">Score</th>
+              <th class="sortable" data-sort="apply_type" data-label="Type">Type</th>
+              <th class="sortable" data-sort="status" data-label="Status">Status</th>
+              <th id="col-approved">Approved</th>
+              <th title="Which resume file is uploaded when you apply to this job">Resume on apply</th>
+              <th>Files</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="empty" hidden></p>
+      <p id="empty-onboarding" class="empty onboarding" hidden></p>
     </div>
-    <table id="grid">
-      <thead>
-        <tr>
-          <th class="c-check"><input id="check-all" type="checkbox" aria-label="Select all visible jobs" /></th>
-          <th class="c-title sortable" data-sort="title" data-label="Title">Title</th>
-          <th class="sortable" data-sort="company" data-label="Company">Company</th>
-          <th>Location</th>
-          <th class="sortable" data-sort="match_score" data-label="Score" title="Score colors: green ≥75, yellow ≥50, gray below">Score</th>
-          <th class="sortable" data-sort="apply_type" data-label="Type">Type</th>
-          <th class="sortable" data-sort="status" data-label="Status">Status</th>
-          <th id="col-approved">Approved</th>
-          <th title="Which resume file is uploaded when you apply to this job">Resume on apply</th>
-          <th>Files</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-    </div>
-    <p id="empty" class="empty" hidden></p>
-    <p id="empty-onboarding" class="empty onboarding" hidden></p>
   </main>
 
   <footer class="site-footer">
-    <button id="btn-reset" class="btn btn-sm btn-danger" type="button" title="Delete all jobs and run history from the database">Reset all data&hellip;</button>
+    <button id="btn-reset" class="btn btn-sm btn-danger-ghost" type="button" title="Delete all jobs and run history from the database">Reset all data&hellip;</button>
   </footer>
   </div>
 
   <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+
+  <div id="generate-dialog" class="action-dialog" hidden aria-hidden="true">
+    <div class="action-dialog-backdrop" id="generate-dialog-backdrop"></div>
+    <div class="action-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="generate-dialog-title">
+      <h2 id="generate-dialog-title">Generate drafts</h2>
+      <p class="action-dialog-lead">Create tailored resumes for eligible jobs. This uses your LLM and may take a while.</p>
+      <label class="chk"><input id="gen-regen" type="checkbox" /> Regenerate existing drafts</label>
+      <div class="action-dialog-actions">
+        <button id="btn-gen-cancel" type="button" class="btn btn-sm">Cancel</button>
+        <button id="btn-gen-confirm" type="button" class="btn btn-sm btn-primary">Generate</button>
+      </div>
+    </div>
+  </div>
 
   <div id="schedule-modal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" id="schedule-modal-backdrop"></div>
@@ -157,6 +164,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=12"></script>
 </body>
 </html>
