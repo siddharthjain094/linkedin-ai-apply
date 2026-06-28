@@ -47,6 +47,7 @@ def score_jobs(
     db: Database,
     llm: LLMClient,
     should_stop: Optional[Callable[[], bool]] = None,
+    job_ids: list[str] | None = None,
 ) -> dict:
     resume_path = settings.resolve_master_resume()
     try:
@@ -68,7 +69,7 @@ def score_jobs(
         db.log_run("score", errors=1, notes=msg)
         return {"scored": 0, "skipped": 0, "error": msg, "resume_chars": len(resume.strip())}
 
-    pending = db.needs_scoring()
+    pending = db.jobs_by_ids(job_ids) if job_ids is not None else db.needs_scoring()
     scored = skipped = errors = auto_approved = 0
     consecutive_failures = 0
     stopped = False

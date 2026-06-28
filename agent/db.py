@@ -231,6 +231,29 @@ class Database:
                 s.expunge(j)
             return jobs
 
+    def jobs_by_ids(self, job_ids: Iterable[str]) -> list[Job]:
+        ids = list(job_ids)
+        if not ids:
+            return []
+        with self.session() as s:
+            stmt = select(Job).where(Job.job_id.in_(ids))
+            jobs = list(s.execute(stmt).scalars().all())
+            for j in jobs:
+                s.expunge(j)
+            return jobs
+
+    def clear_match_scores(self, job_ids: Iterable[str] | None = None) -> int:
+        """Clear match_score and match_reasons so jobs can be re-scored."""
+        with self.session() as s:
+            if job_ids is not None:
+                jobs = [j for jid in job_ids if (j := self.get(s, jid)) is not None]
+            else:
+                jobs = list(s.execute(select(Job)).scalars().all())
+            for job in jobs:
+                job.match_score = None
+                job.match_reasons = ""
+            return len(jobs)
+
     def all_jobs(self) -> list[Job]:
         with self.session() as s:
             jobs = list(s.execute(select(Job).order_by(Job.created_at.desc())).scalars().all())

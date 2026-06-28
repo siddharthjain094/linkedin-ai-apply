@@ -23,6 +23,7 @@ const state = {
   statusFilter: "",
   approvedOnly: false,
   generateDialogArmed: false,
+  scoreDialogArmed: false,
 };
 
 const STATUS_LABELS = {
@@ -36,6 +37,7 @@ const STATUS_LABELS = {
 
 const ACTION_LABELS = {
   find: "Fetch jobs",
+  score: "Score jobs",
   generate: "Generate drafts",
   apply: "Apply",
 };
@@ -66,7 +68,7 @@ function updateMutationButtons() {
   const locked = state.busy || state.mutating > 0;
   [
     "btn-approve", "btn-reject", "btn-resume-tailored", "btn-resume-mine",
-    "btn-schedule", "btn-clear-sel",
+    "btn-rescore", "btn-schedule", "btn-clear-sel",
   ].forEach((id) => {
     const el = $(id);
     if (el) el.disabled = locked;
@@ -190,6 +192,9 @@ function renderStatsBar() {
     .filter(([, v]) => v > 0)
     .map(([k, v]) => statPillHtml(k, statusLabel(k), v, state.statusFilter === k));
   parts.push(statPillHtml("approved", "Approved", s.approved, state.approvedOnly));
+  if (s.unscored > 0) {
+    parts.push(`<span class="pill dim" title="Jobs without a match score yet">${s.unscored} unscored</span>`);
+  }
   parts.push(statPillHtml("", "All jobs", state.jobs.length, !state.statusFilter && !state.approvedOnly));
   parts.push('<span class="pill dim" title="Green ≥75, yellow ≥50, gray below">score legend</span>');
   el.innerHTML = parts.join("");
@@ -200,6 +205,7 @@ async function loadStats() {
     state.stats = await api("/api/stats");
     renderStatsBar();
     updateApplyButton();
+    updateScoreButton();
   } catch (e) {
     state.stats = null;
     const pills = $("stats-pills");
@@ -688,7 +694,7 @@ function setPipelineActive(stepId) {
 }
 
 function setPipelineRunning(action) {
-  const map = { find: "btn-find", generate: "btn-generate", apply: "btn-apply" };
+  const map = { find: "btn-find", score: "btn-score", generate: "btn-generate", apply: "btn-apply" };
   const runningId = map[action];
   document.querySelectorAll(".workflow-btn").forEach((el) => {
     el.classList.remove("running");
@@ -774,6 +780,95 @@ function scoreClass(s) {
   return "lo";
 }
 
+function scoreTipText(j) {
+  const reasons = (j.match_reasons || "").trim();
+  if (reasons) return reasons;
+  if (j.match_score == null) return "Not scored yet — use Score jobs or Fetch jobs.";
+  return "No match details recorded.";
+}
+
+function scoreTipAttr(j) {
+  return esc(scoreTipText(j)).replace(/\s+/g, " ").trim();
+}
+
+function scoreCellHtml(j) {
+  const score = j.match_score == null ? null : Math.round(j.match_score);
+  const display = score == null ? "\u2013" : String(score);
+  const reasons = (j.match_reasons || "").trim();
+  const isError = reasons.startsWith("scoring error:");
+  const cls = ["score", scoreClass(j.match_score)];
+  if (isError) cls.push("err");
+  const tipAttr = scoreTipAttr(j);
+  return `<td class="${cls.join(" ")}"><span class="score-val has-tip" tabindex="0" data-tip="${tipAttr}" aria-describedby="score-tooltip">${display}</span></td>`;
+}
+
+let scoreTooltipAnchor = null;
+
+function hideScoreTooltip() {
+  const tip = $("score-tooltip");
+  if (tip) tip.hidden = true;
+  scoreTooltipAnchor = null;
+}
+
+function positionScoreTooltip(anchor) {
+  const tip = $("score-tooltip");
+  if (!tip || !anchor) return;
+  const margin = 10;
+  const rect = anchor.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - tipRect.width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - tipRect.width - margin));
+  let top = rect.top - tipRect.height - margin;
+  if (top < margin) top = rect.bottom + margin;
+  top = Math.max(margin, Math.min(top, window.innerHeight - tipRect.height - margin));
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
+}
+
+function showScoreTooltip(anchor) {
+  const tip = $("score-tooltip");
+  if (!tip || !anchor?.dataset.tip) return;
+  scoreTooltipAnchor = anchor;
+  tip.textContent = anchor.dataset.tip;
+  tip.hidden = false;
+  tip.style.left = "-9999px";
+  tip.style.top = "-9999px";
+  requestAnimationFrame(() => positionScoreTooltip(anchor));
+}
+
+function wireScoreTooltips() {
+  const rows = $("rows");
+  if (!rows) return;
+
+  rows.addEventListener("mouseover", (e) => {
+    const val = e.target.closest(".score-val.has-tip");
+    if (val) showScoreTooltip(val);
+  });
+
+  rows.addEventListener("mouseout", (e) => {
+    const val = e.target.closest(".score-val.has-tip");
+    if (val && !val.contains(e.relatedTarget)) hideScoreTooltip();
+  });
+
+  rows.addEventListener("focusin", (e) => {
+    const val = e.target.closest(".score-val.has-tip");
+    if (val) showScoreTooltip(val);
+  });
+
+  rows.addEventListener("focusout", (e) => {
+    const val = e.target.closest(".score-val.has-tip");
+    if (val && !val.contains(e.relatedTarget)) hideScoreTooltip();
+  });
+
+  const reposition = () => {
+    if (scoreTooltipAnchor && !$("score-tooltip")?.hidden) {
+      positionScoreTooltip(scoreTooltipAnchor);
+    }
+  };
+  window.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition);
+}
+
 function sortIndicator(key) {
   if (state.sortKey !== key) return "";
   return state.sortDir > 0 ? " \u2191" : " \u2193";
@@ -818,7 +913,6 @@ function docsHtml(j) {
 
 function rowHtml(j) {
   const checked = state.selected.has(j.job_id) ? "checked" : "";
-  const score = j.match_score == null ? "&ndash;" : Math.round(j.match_score);
   const titleLink = j.url
     ? `<a class="title-link" href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title) || "(untitled)"} <span class="ext-icon" aria-hidden="true">&#8599;</span></a>`
     : `<div class="title">${esc(j.title) || "(untitled)"}</div>`;
@@ -829,7 +923,7 @@ function rowHtml(j) {
     <td class="c-title">${titleLink}</td>
     <td>${esc(j.company)}</td>
     <td>${esc(j.location)}</td>
-    <td class="score ${scoreClass(j.match_score)}">${score}</td>
+    ${scoreCellHtml(j)}
     <td>${esc(j.apply_type)}</td>
     <td><span class="badge ${esc(j.status)}">${statusLabel(j.status)}</span></td>
     <td class="c-approved">${j.approved ? '<span class="yes">yes</span>' : '<span class="no">&mdash;</span>'}</td>
@@ -882,6 +976,7 @@ function render() {
 
   $("rows").innerHTML = rows.map(rowHtml).join("");
   renderEmptyStates(rows);
+  hideScoreTooltip();
 
   const visibleSel = visibleSelectedIds();
   const hidden = hiddenSelectedCount();
@@ -911,6 +1006,7 @@ function render() {
   }
 
   updateApplyButton();
+  updateScoreButton();
   updateMutationButtons();
 
   if (hadFocus && searchEl) {
@@ -1043,6 +1139,57 @@ async function applySelected() {
   await trigger("apply", { job_ids: ids });
 }
 
+function updateScoreButton() {
+  const btn = $("btn-score");
+  if (!btn) return;
+  const unscored = state.stats?.unscored ?? 0;
+  btn.textContent = unscored > 0 ? `Score jobs (${unscored})` : "Score jobs";
+  btn.title = unscored > 0
+    ? `${unscored} job(s) not scored yet — match against your master resume (no LinkedIn fetch)`
+    : "Score unscored jobs against your master resume (no LinkedIn fetch)";
+}
+
+async function rescoreSelected() {
+  const ids = selectedIds();
+  if (!ids.length) return toast("Select some visible jobs first.", true);
+  const msg = `Re-score ${ids.length} selected job(s)?\n\nThis clears their current scores and calls the LLM again.`;
+  if (!confirm(msg)) return;
+  await trigger("score", { job_ids: ids, rescore: true });
+}
+
+function scoreDialogOpen() {
+  const dialog = $("score-dialog");
+  if (!dialog || state.busy) return;
+  const rescore = $("score-rescore");
+  if (rescore) rescore.checked = false;
+  dialog.hidden = false;
+  dialog.classList.add("is-open");
+  dialog.setAttribute("aria-hidden", "false");
+  state.scoreDialogArmed = false;
+  requestAnimationFrame(() => { state.scoreDialogArmed = true; });
+  $("btn-score-confirm")?.focus();
+}
+
+function scoreDialogClose() {
+  const dialog = $("score-dialog");
+  if (!dialog) return;
+  dialog.classList.remove("is-open");
+  dialog.hidden = true;
+  dialog.setAttribute("aria-hidden", "true");
+  state.scoreDialogArmed = false;
+  $("btn-score")?.focus();
+}
+
+async function triggerScore() {
+  scoreDialogOpen();
+}
+
+async function confirmScore() {
+  const rescore = !!$("score-rescore")?.checked;
+  scoreDialogClose();
+  await trigger("score", { rescore });
+}
+
 async function triggerFind() {
   if (!confirm("Fetch jobs from LinkedIn? This opens the browser and may take several minutes.")) return;
   await trigger("find");
@@ -1142,7 +1289,7 @@ async function pollStatus() {
   const el = $("run-status");
   const busy = s.running;
   state.busy = busy;
-  ["btn-find", "btn-generate", "btn-apply", "btn-reset"].forEach((id) => {
+  ["btn-find", "btn-score", "btn-generate", "btn-apply", "btn-reset"].forEach((id) => {
     const node = $(id);
     if (node) node.disabled = busy;
   });
@@ -1233,7 +1380,7 @@ function wire() {
   });
 
   $("rows").addEventListener("click", (e) => {
-    if (e.target.closest("a, button, input, .seg")) return;
+    if (e.target.closest("a, button, input, .seg, .score-val")) return;
     const tr = e.target.closest("tr[data-id]");
     if (!tr) return;
     const id = tr.dataset.id;
@@ -1282,6 +1429,16 @@ function wire() {
   $("btn-resume-tailored").addEventListener("click", () => setResumeSource(false));
   $("btn-resume-mine").addEventListener("click", () => setResumeSource(true));
   $("btn-find").addEventListener("click", () => triggerFind().catch((e) => toast(e.message, true)));
+  $("btn-score")?.addEventListener("click", () => triggerScore());
+  $("btn-score-cancel")?.addEventListener("click", scoreDialogClose);
+  $("btn-score-confirm")?.addEventListener("click", () =>
+    confirmScore().catch((e) => toast(e.message, true)));
+  $("score-dialog-backdrop")?.addEventListener("click", (e) => {
+    if (!state.scoreDialogArmed) return;
+    if (e.target.id === "score-dialog-backdrop") scoreDialogClose();
+  });
+  $("btn-rescore")?.addEventListener("click", () =>
+    rescoreSelected().catch((e) => toast(e.message, true)));
   $("btn-generate").addEventListener("click", () => triggerGenerate());
   $("btn-gen-cancel")?.addEventListener("click", generateDialogClose);
   $("btn-gen-confirm")?.addEventListener("click", () =>
@@ -1315,6 +1472,7 @@ function wire() {
     if (e.key === "Escape") {
       if ($("generate-dialog")?.classList.contains("is-open")) generateDialogClose();
       else if ($("schedule-modal")?.classList.contains("is-open")) scheduleModalClose();
+      else if ($("score-dialog")?.classList.contains("is-open")) scoreDialogClose();
       else if ($("runs-modal")?.classList.contains("is-open")) runsModalClose();
     }
   });
@@ -1345,6 +1503,7 @@ function wire() {
     replaceJobCover(jobId, file).catch((err) => toast(err.message, true));
   });
 
+  wireScoreTooltips();
 }
 
 wire();

@@ -173,6 +173,43 @@ def _run_find() -> dict:
     return disc
 
 
+def _run_score(job_ids: list[str] | None, rescore: bool) -> dict:
+    from agent.llm.provider import LLMClient, llm_is_configured
+    from agent.pipeline import match
+    from agent import sheet
+    from agent.runlock import run_lock
+
+    settings = _settings()
+    if not llm_is_configured(settings):
+        raise RuntimeError("No LLM configured (set LLM_API_KEY + LLM_MODEL in .env).")
+    db = _db(settings)
+    with run_lock(settings.db_file.parent / "run.lock"):
+        ids = job_ids or None
+        if rescore:
+            cleared = db.clear_match_scores(ids)
+            runner.set_progress(f"Cleared scores on {cleared} job(s)")
+        runner.set_progress("Scoring jobs against resume…")
+        stats = match.score_jobs(
+            settings,
+            db,
+            LLMClient(settings),
+            should_stop=runner.should_stop,
+            job_ids=ids,
+        )
+        sheet.export(db, settings.sheet_file)
+    if stats.get("error"):
+        raise RuntimeError(stats["error"])
+    scored = stats.get("scored", 0)
+    errors = stats.get("errors", 0)
+    skipped = stats.get("skipped", 0)
+    msg = f"{scored} scored"
+    if errors:
+        msg += f", {errors} error(s) — hover scores or check Recent runs"
+    if skipped:
+        msg += f", {skipped} skipped"
+    return {**stats, "message": msg}
+
+
 def _run_generate(regenerate: bool = False) -> dict:
     from agent.llm.provider import LLMClient, llm_is_configured
     from agent.pipeline.generate import generate_all
@@ -231,6 +268,11 @@ class GeneratePayload(BaseModel):
     regenerate: bool = False
 
 
+class ScorePayload(BaseModel):
+    job_ids: list[str] = Field(default_factory=list)
+    rescore: bool = False
+
+
 class ApplyPayload(BaseModel):
     only_approved: bool = False
     job_ids: list[str] = Field(default_factory=list)
@@ -278,11 +320,14 @@ def create_app() -> FastAPI:
         db = _db(settings)
         counts: dict[str, int] = {}
         approved = 0
+        unscored = 0
         for j in db.all_jobs():
             counts[j.status] = counts.get(j.status, 0) + 1
             if j.approved:
                 approved += 1
-        return {"by_status": counts, "approved": approved}
+            if j.match_score is None:
+                unscored += 1
+        return {"by_status": counts, "approved": approved, "unscored": unscored}
 
     @app.get("/api/profile")
     def profile() -> dict:
@@ -489,6 +534,16 @@ def create_app() -> FastAPI:
     @app.post("/api/actions/find", status_code=202)
     def action_find() -> dict:
         if not runner.start("find", _run_find):
+            raise HTTPException(status_code=409, detail="another action is running")
+        return runner.snapshot()
+
+    @app.post("/api/actions/score", status_code=202)
+    def action_score(payload: ScorePayload = ScorePayload()) -> dict:
+        ids = payload.job_ids or None
+        if not runner.start(
+            "score",
+            lambda: _run_score(ids, payload.rescore),
+        ):
             raise HTTPException(status_code=409, detail="another action is running")
         return runner.snapshot()
 

@@ -87,3 +87,34 @@ def test_empty_resume_aborts_without_scoring_zero(tmp_path):
         job = db.get(s, "1")
         assert job is not None
         assert job.match_score is None
+
+
+def test_rescore_selected_jobs_only(tmp_path):
+    from agent.pipeline import match as match_mod
+
+    resume = tmp_path / "resume.txt"
+    resume.write_text(
+        "Jane Engineer — 8 years Python, distributed systems, AWS, Kubernetes, "
+        "PostgreSQL, and building APIs at scale.\n" * 3,
+        encoding="utf-8",
+    )
+    settings = Settings(master_resume_path=str(resume), match_threshold=70)
+    db = Database(tmp_path / "s.db")
+    db.upsert_discovered([_job("1"), _job("2")])
+
+    match_mod.score_jobs(settings, db, FakeLLM(40))
+    db.clear_match_scores(["1"])
+
+    class RisingLLM:
+        def chat_json(self, *a, **k):
+            return {"score": 90, "reasons": "updated"}
+
+    match_mod.score_jobs(settings, db, RisingLLM(), job_ids=["1"])
+
+    with db.session() as s:
+        j1 = db.get(s, "1")
+        j2 = db.get(s, "2")
+        assert j1 is not None and j2 is not None
+        assert j1.match_score == 90
+        assert j1.match_reasons == "updated"
+        assert j2.match_score == 40
