@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Callable, Optional
 
 from agent.browser.finders import human_delay, try_click
 from agent.browser.forms import resolve_answer
@@ -30,6 +31,12 @@ from agent.llm.provider import LLMClient
 logger = logging.getLogger(__name__)
 
 MODAL = "div.jobs-easy-apply-modal, div[data-test-modal]"
+MODAL_CONTENT = (
+    "div.jobs-easy-apply-content",
+    "div.jobs-easy-apply-modal__content",
+    "div[data-test-modal-content]",
+    "div.artdeco-modal__content",
+)
 MAX_STEPS = 14
 
 
@@ -40,6 +47,7 @@ def easy_apply(
     intake: dict,
     llm: LLMClient | None,
     resume_path: Path | None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> tuple[str, str, list[dict]]:
     page = session.page
     try:
@@ -96,6 +104,10 @@ def easy_apply(
         return "not_easy", "Apply clicked but no Easy Apply modal opened (likely external).", []
 
     for _ in range(MAX_STEPS):
+        if should_stop and should_stop():
+            _dismiss_modal(page)
+            return "stopped", "Stop requested during Easy Apply.", []
+
         if page.locator(MODAL).count() == 0:
             break
 
@@ -106,25 +118,37 @@ def easy_apply(
             labels = ", ".join(u["question"] for u in unanswered)
             return "human_review", f"Could not answer required field(s): {labels}", unanswered
 
+        # LinkedIn keeps Next/Submit in a sticky footer; scroll the modal body first so
+        # hidden required fields are filled and footer buttons are clickable.
+        _scroll_modal_content(page)
+
         # Final submit.
         if _footer_has(page, "Submit application"):
             if settings.dry_run:
                 _dismiss_modal(page)
                 return "human_review", "DRY_RUN: stopped before submit.", []
             _uncheck_follow(page)
-            if try_click(page, "button[aria-label='Submit application'], "
-                               "button:has-text('Submit application')"):
+            if _click_modal_footer(
+                page,
+                "button[aria-label='Submit application']",
+                "button:has-text('Submit application')",
+            ):
                 human_delay(settings.min_delay_ms, settings.max_delay_ms)
                 _dismiss_modal(page)
                 return "applied", "Submitted via Easy Apply.", []
             return "error", "Submit button click failed.", []
 
-        # Otherwise advance.
+        # Otherwise advance (never click the draft "Save" control).
         advanced = (
-            try_click(page, "button[aria-label='Continue to next step'], "
-                            "button:has-text('Next'), button:has-text('Continue')")
-            or try_click(page, "button[aria-label='Review your application'], "
-                               "button:has-text('Review')")
+            _click_modal_footer(
+                page,
+                "button[aria-label='Continue to next step']",
+                "button[aria-label='Review your application']",
+                "footer button:has-text('Next')",
+                "footer button:has-text('Review')",
+                "button:has-text('Next')",
+                "button:has-text('Review')",
+            )
         )
         if not advanced:
             _save_screenshot(settings, job, page)
@@ -148,8 +172,70 @@ def _external_tab(page):
     return None
 
 
+def _modal(page):
+    return page.locator(MODAL).first
+
+
 def _footer_has(page, text: str) -> bool:
-    return page.locator(f"button:has-text('{text}'), button[aria-label*='{text}']").count() > 0
+    modal = _modal(page)
+    if modal.count() == 0:
+        return False
+    return modal.locator(
+        f"button:has-text('{text}'), button[aria-label*='{text}']"
+    ).count() > 0
+
+
+def _scroll_modal_content(page) -> None:
+    """Scroll the Easy Apply modal body so off-screen fields and footer CTAs are reachable."""
+    modal = _modal(page)
+    if modal.count() == 0:
+        return
+    for sel in MODAL_CONTENT:
+        content = modal.locator(sel).first
+        if content.count() == 0:
+            continue
+        try:
+            content.evaluate(
+                """el => {
+                    const step = Math.max(200, el.clientHeight * 0.85);
+                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                    el.scrollTop = 0;
+                    for (let y = 0; y <= max; y += step) {
+                        el.scrollTop = y;
+                    }
+                    el.scrollTop = max;
+                    el.scrollTop = 0;
+                }"""
+            )
+            return
+        except Exception:
+            continue
+    try:
+        modal.evaluate("el => { el.scrollTop = el.scrollHeight; el.scrollTop = 0; }")
+    except Exception:
+        pass
+
+
+def _click_modal_footer(page, *selectors: str) -> bool:
+    """Click a footer action inside the Easy Apply modal (Next / Review / Submit)."""
+    modal = _modal(page)
+    if modal.count() == 0:
+        return False
+    _scroll_modal_content(page)
+    for sel in selectors:
+        btn = modal.locator(sel).first
+        if btn.count() == 0:
+            continue
+        try:
+            btn.scroll_into_view_if_needed(timeout=3000)
+            btn.wait_for(state="visible", timeout=4000)
+            if btn.is_disabled():
+                continue
+            btn.click(timeout=8000)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _fill_visible_fields(page, settings, intake, llm, resume_path) -> list[dict]:
@@ -159,14 +245,17 @@ def _fill_visible_fields(page, settings, intake, llm, resume_path) -> list[dict]
     answer (empty list means the step is fully filled).
     """
     unanswered: list[dict] = []
+    modal = _modal(page)
+    _scroll_modal_content(page)
 
     # Resume upload, if the step asks for it.
-    if resume_path and page.locator("input[type='file']").count() > 0:
+    file_inputs = modal if modal.count() > 0 else page
+    if resume_path and file_inputs.locator("input[type='file']").count() > 0:
         try:
             if not resume_path.exists():
                 logger.warning("Resume file not found for upload: %s", resume_path)
             else:
-                file_input = page.locator("input[type='file']").first
+                file_input = file_inputs.locator("input[type='file']").first
                 file_input.set_input_files(str(resume_path))
                 human_delay(settings.min_delay_ms, settings.max_delay_ms)
                 # Verify the file was actually attached to the input.
@@ -182,11 +271,17 @@ def _fill_visible_fields(page, settings, intake, llm, resume_path) -> list[dict]
         except Exception as exc:
             logger.warning("Resume upload failed for %s: %s", resume_path, exc)
 
-    groups = page.locator("div.jobs-easy-apply-form-section__grouping, "
-                          "div.fb-dash-form-element, div[data-test-form-element]")
+    groups = (modal if modal.count() > 0 else page).locator(
+        "div.jobs-easy-apply-form-section__grouping, "
+        "div.fb-dash-form-element, div[data-test-form-element]"
+    )
     n = groups.count()
     for i in range(n):
         g = groups.nth(i)
+        try:
+            g.scroll_into_view_if_needed(timeout=3000)
+        except Exception:
+            pass
         try:
             label = _label_of(g)
             if not label:

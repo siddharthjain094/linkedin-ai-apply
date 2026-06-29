@@ -51,7 +51,9 @@ def discover(
                 if progress:
                     progress(msg)
                 try:
-                    for job in search.scrape_search(session, settings, title, location):
+                    for job in search.scrape_search(
+                        session, settings, title, location, should_stop=should_stop,
+                    ):
                         collected.setdefault(job["job_id"], job)
                 except Exception as exc:
                     console.log(f"[yellow]search failed for {title}/{location}: {exc}[/]")
@@ -60,7 +62,9 @@ def discover(
                 _guard()
                 console.log(f"Scanning hiring posts for: '{title}'")
                 try:
-                    for post in hiring_posts.scrape_hiring_posts(session, settings, title):
+                    for post in hiring_posts.scrape_hiring_posts(
+                        session, settings, title, should_stop=should_stop,
+                    ):
                         collected.setdefault(post["job_id"], post)
                 except Exception as exc:
                     console.log(f"[yellow]hiring-post scan failed for {title}: {exc}[/]")

@@ -125,7 +125,7 @@ def test_apply_uses_master_resume_when_flagged(tmp_path, monkeypatch):
     db.update("1", use_master_resume=True)
     uploaded = {}
 
-    def fake_easy(session, settings, job, intake, llm, resume_path):
+    def fake_easy(session, settings, job, intake, llm, resume_path, **_k):
         uploaded["path"] = resume_path
         return "applied", "ok", []
 
@@ -153,7 +153,7 @@ def test_apply_selected_job_ids_only(tmp_path, monkeypatch):
     db.update("2", match_score=90)
     seen = []
 
-    def fake_easy(session, settings, job, intake, llm, resume_path):
+    def fake_easy(session, settings, job, intake, llm, resume_path, **_k):
         seen.append(job["job_id"])
         return "applied", "ok", []
 

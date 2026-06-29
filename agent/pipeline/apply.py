@@ -92,7 +92,10 @@ def run_apply(
             label = f"{job.title} @ {job.company}".strip(" @")
             if progress:
                 progress(f"Opening job: {label}")
-            _process_one(session, settings, db, llm, job, regenerate, stats, skip_generate=skip_generate)
+            _process_one(session, settings, db, llm, job, regenerate, stats,
+                         skip_generate=skip_generate, should_stop=should_stop)
+            if stats.get("stopped"):
+                break
             if stats.pop("_just_submitted", False):
                 submitted += 1
     finally:
@@ -106,7 +109,8 @@ def run_apply(
     return stats
 
 
-def _process_one(session, settings, db, llm, job, regenerate, stats, *, skip_generate=False) -> None:
+def _process_one(session, settings, db, llm, job, regenerate, stats, *, skip_generate=False,
+                 should_stop=None) -> None:
     """Generate (if needed), route, submit, and record outcome for one job."""
     # 1) Reuse already-generated docs (preserving manual edits); else draft now.
     resume_path = job.resume_path or ""
@@ -162,14 +166,21 @@ def _process_one(session, settings, db, llm, job, regenerate, stats, *, skip_gen
         status, notes, needs_input = _go_external()
     elif linkedin_job or apply_type in ("easy", "unknown", "external"):
         status, notes, needs_input = easy_apply(
-            session, settings, job.as_row(), settings.intake, llm, upload)
+            session, settings, job.as_row(), settings.intake, llm, upload,
+            should_stop=should_stop)
         if status == "not_easy":
             status, notes, needs_input = _go_external()
     else:
         status, notes, needs_input = easy_apply(
-            session, settings, job.as_row(), settings.intake, llm, upload)
+            session, settings, job.as_row(), settings.intake, llm, upload,
+            should_stop=should_stop)
         if status == "not_easy":
             status, notes, needs_input = _go_external()
+
+    if status == "stopped":
+        stats["stopped"] = True
+        console.log("[yellow]Stop requested - halting during application.[/]")
+        return
 
     if status == "_parked":
         stats["human_review"] += 1

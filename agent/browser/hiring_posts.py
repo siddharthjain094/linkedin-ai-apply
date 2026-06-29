@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Callable, Optional
 from urllib.parse import urlencode
 
 from agent.browser.finders import human_delay
@@ -22,7 +23,12 @@ def _post_id(text: str, author: str) -> str:
     return f"post-{h}"
 
 
-def scrape_hiring_posts(session, settings: Settings, title: str) -> list[dict]:
+def scrape_hiring_posts(
+    session,
+    settings: Settings,
+    title: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> list[dict]:
     page = session.page
     query = f"hiring {title}"
     params = {"keywords": query, "datePosted": "past-week", "sortBy": "date_posted"}
@@ -31,6 +37,8 @@ def scrape_hiring_posts(session, settings: Settings, title: str) -> list[dict]:
 
     results: dict[str, dict] = {}
     for _ in range(4):
+        if should_stop and should_stop():
+            break
         try:
             page.mouse.wheel(0, 3000)
         except Exception:
@@ -40,6 +48,8 @@ def scrape_hiring_posts(session, settings: Settings, title: str) -> list[dict]:
     posts = page.locator("div.feed-shared-update-v2, div.update-components-text")
     count = min(posts.count(), settings.search.max_jobs_per_search)
     for i in range(count):
+        if should_stop and should_stop():
+            break
         try:
             post = posts.nth(i)
             text = (post.inner_text(timeout=2000) or "").strip()

@@ -516,6 +516,12 @@ def create_app() -> FastAPI:
     def action_status() -> dict:
         return runner.snapshot()
 
+    @app.post("/api/actions/stop")
+    def action_stop() -> dict:
+        if not runner.request_stop():
+            raise HTTPException(status_code=409, detail="no action is running")
+        return runner.snapshot()
+
     @app.post("/api/reset")
     def reset_data() -> dict:
         """Wipe all jobs and run history so the user can start fresh."""

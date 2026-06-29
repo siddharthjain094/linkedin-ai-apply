@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlencode
 
+from typing import Callable, Optional
+
 from agent.browser.finders import human_delay
 from agent.config import SearchConfig, Settings
 
@@ -67,8 +69,17 @@ def _job_id_from_url(url: str) -> str:
     return m.group(1) if m else url
 
 
-def scrape_search(session, settings: Settings, title: str, location: str) -> list[dict]:
+def scrape_search(
+    session,
+    settings: Settings,
+    title: str,
+    location: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> list[dict]:
     """Scrape one (title, location) search. Returns a list of job dicts."""
+    def _stop() -> bool:
+        return bool(should_stop and should_stop())
+
     sc = settings.search
     page = session.page
     url = build_url(title, location, sc)
@@ -82,10 +93,14 @@ def scrape_search(session, settings: Settings, title: str, location: str) -> lis
     target = sc.max_jobs_per_search
 
     while len(found) < target:
+        if _stop():
+            break
         _scroll_list(page)
         cards = page.locator("div.job-card-container, li.jobs-search-results__list-item")
         count = cards.count()
         for i in range(count):
+            if _stop():
+                break
             try:
                 card = cards.nth(i)
                 link = card.locator("a.job-card-container__link, a.job-card-list__title").first
@@ -113,6 +128,8 @@ def scrape_search(session, settings: Settings, title: str, location: str) -> lis
             except Exception:
                 continue
 
+        if _stop():
+            break
         if not _go_next_page(page, settings):
             break
 
